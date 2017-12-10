@@ -1,0 +1,45 @@
+{
+  "name": "kakoune-languageclient",
+  "license": "MIT",
+  "version": "0.1.0",
+  "author": "Dan Rosén",
+  "description": "Language server protocol client for the Kakoune text editor",
+  "main": "./dist/bundle.js",
+  "dependencies": {
+    "ramda": "^0.25.0",
+    "reactive-lens": "^0.3.0",
+    "vscode-jsonrpc": "^3.5.0",
+    "vscode-languageserver": "^3.5.0",
+    "vscode-languageserver-types": "^3.5.0"
+  },
+  "devDependencies": {
+    "@types/ramda": "github:types/npm-ramda#dist",
+    "@types/tape": "^4.2.31",
+    "tape": "^4.8.0",
+    "ts-node": "^3.3.0",
+    "typescript": "^2.6.1"
+  },
+  "scripts": {
+    "prepublishOnly": "npm run build",
+    "build": "tsc"
+  },
+  "keywords": [
+    "kakoune",
+    "intellisense",
+    "completion",
+    "hover",
+    "lsp",
+    "languageclient",
+    "language-client",
+    "language-server-protocol",
+    "language server protocol"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/danr/kakoune-languageclient.git"
+  },
+  "bugs": {
+    "url": "https://github.com/danr/kakoune-languageclient/issues"
+  },
+  "homepage": "https://github.com/danr/kakoune-languageclient#readme"
+}

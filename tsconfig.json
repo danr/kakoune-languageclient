@@ -1,0 +1,17 @@
+{
+    "compilerOptions": {
+        "outDir": "./dist/",
+        "sourceMap": false,
+        "noImplicitAny": true,
+        "strict": true,
+        "module": "commonjs",
+        "moduleResolution": "node",
+        "allowUnreachableCode": true,
+        "target": "es6",
+        "noEmitOnError": true
+    },
+    "include": [
+        "./src/*",
+        "./test/*"
+    ]
+}
