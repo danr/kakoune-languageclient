@@ -2,9 +2,22 @@ import * as jsonrpc from 'vscode-jsonrpc'
 import * as ls from 'vscode-languageserver'
 import * as lsp from 'vscode-languageserver-protocol'
 import * as lspt from 'vscode-languageserver-types'
-import * as cp from 'child_process';
 import * as rpc from 'vscode-jsonrpc';
-import { MessageKakoune, SpliceDetails, Details, subkeys, KakouneBuddy, val, opt, arg, id } from './libkak'
+import * as fs from 'fs';
+import * as path from 'path';
+import * as cp from 'child_process';
+import * as process from 'process'
+import * as libkak from './libkak'
+import { Splice, Details, subkeys, Standard, StandardKeys } from './libkak'
+
+const session = process.argv[2]
+
+const { fifo, handlers } = libkak.CreateHandler()
+
+const { def, ask } = libkak.KakouneBuddy<Splice>(Details, handlers, fifo, (x: string) => {
+  console.log(x)
+  libkak.MessageKakoune({ session }, x)
+})
 
 console.log('spawning')
 const child = cp.spawn('typescript-language-server', ['--stdio'],
@@ -76,37 +89,6 @@ SendRequest(lsp.InitializeRequest.type, {
   })
 )
 
-const handlers = {}
-
-export interface Splice {
-  buffile: string,
-  timestamp: number,
-  client: string,
-  selection: string,
-  cursor_line: number,
-  cursor_column: number,
-  filetype: string,
-  1: string,
-}
-
-const Details: SpliceDetails<Splice> = {
-  ...val('buffile', id),
-  ...val('client', id),
-  ...val('timestamp', parseInt),
-  ...val('cursor_line', parseInt),
-  ...val('cursor_column', parseInt),
-  ...val('selection', id),
-  ...opt('filetype', id),
-  ...arg('1', id),
-}
-
-export const StandardKeys = subkeys(Details, 'buffile', 'client', 'timestamp', 'cursor_line', 'cursor_column', 'selection', 'filetype')
-
-export type StandardKeys = typeof StandardKeys[0]
-
-export type Standard = Pick<Splice, StandardKeys>
-
-const {def} = KakouneBuddy<Splice>(Details, '%opt{lsp_fifo}', x => console.log(x), handlers)
 
 function Uri(d: Pick<Standard, 'buffile'>): lsp.TextDocumentIdentifier {
   return {
@@ -157,5 +139,3 @@ def('lsp-hover', '-params 0..1',
       console.groupEnd()
     })
   })
-
-
