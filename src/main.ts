@@ -4,6 +4,7 @@ import * as lsp from 'vscode-languageserver-protocol'
 import * as lspt from 'vscode-languageserver-types'
 import * as cp from 'child_process';
 import * as rpc from 'vscode-jsonrpc';
+import { MessageKakoune, SpliceDetails, Details, subkeys, KakouneBuddy, val, opt, arg, id } from './libkak'
 
 console.log('spawning')
 const child = cp.spawn('typescript-language-server', ['--stdio'],
@@ -54,8 +55,8 @@ function SendRequest<P, R, E, RO>(type: lsp.RequestType<P, R, E, RO>, params: P,
   return connection.sendRequest(type, params, token)
 }
 
-function SendNotification<P, RO>(type: lsp.NotificationType<P, RO>, params: P): void {
-  return connection.sendNotification(type, params)
+function SendNotification<P, RO>(type: lsp.NotificationType<P, RO>): (params: P) => void {
+  return params => connection.sendNotification(type, params)
 }
 
 SendRequest(lsp.InitializeRequest.type, {
@@ -65,7 +66,7 @@ SendRequest(lsp.InitializeRequest.type, {
   trace: 'verbose'
 }).then(
   (x: any) => console.log('initialized:', x)
-  || SendNotification(lsp.DidOpenTextDocumentNotification.type, {
+  || SendNotification(lsp.DidOpenTextDocumentNotification.type)({
     textDocument: {
       uri: 'file:///home/dan/code/kakoune-languageclient/src/main.ts',
       languageId: 'typescript',
@@ -75,9 +76,9 @@ SendRequest(lsp.InitializeRequest.type, {
   })
 )
 
-type Splices = 'buffile' | 'timestamp'
+const handlers = {}
 
-interface Splice {
+export interface Splice {
   buffile: string,
   timestamp: number,
   client: string,
@@ -88,58 +89,32 @@ interface Splice {
   1: string,
 }
 
-const splice_map: {[k in keyof Splice]?: string} = {}
-
-function splice(expand: ((s: string) => string)): <K extends keyof Splice>(x: K, k: (s: string) => Splice[K]) => K {
-  return (x, k) => (splice_map[x] = expand(x), x)
+const Details: SpliceDetails<Splice> = {
+  ...val('buffile', id),
+  ...val('client', id),
+  ...val('timestamp', parseInt),
+  ...val('cursor_line', parseInt),
+  ...val('cursor_column', parseInt),
+  ...val('selection', id),
+  ...opt('filetype', id),
+  ...arg('1', id),
 }
 
-const val = splice(s => '%val{' + s + '}')
-const arg = splice(s => '%arg{' + s + '}')
-const opt = splice(s => '%opt{' + s + '}')
-const reg = splice(s => '%reg{' + s + '}')
-const client_env = splice(s => '%val{client_env_' + s + '}')
-function splices<K extends keyof Splice>(...xs: K[]): K[] {
-  return xs
-}
+export const StandardKeys = subkeys(Details, 'buffile', 'client', 'timestamp', 'cursor_line', 'cursor_column', 'selection', 'filetype')
 
-const id = <A>(a: A) => a
+export type StandardKeys = typeof StandardKeys[0]
 
-const buffile = val('buffile', id)
-const client = val('client', id)
-const timestamp = val('timestamp', parseInt)
-const cursor_line = val('cursor_line', parseInt)
-const cursor_column = val('cursor_column', parseInt)
-const selection = val('selection', id)
-const filetype = opt('filetype', id)
-const arg1 = arg('1', id)
-const standard = splices(buffile, timestamp, client, cursor_line, cursor_column)
+export type Standard = Pick<Splice, StandardKeys>
 
-function Register<K extends keyof Splice>(command_name: string, args: K[], on: (interpolated: Pick<Splice, K>) => void) {
-  const w = (x: string) => console.log(x)
-  w(`def -allow-override ` + command_name + ` %{`)
-  w(`  eval -no-hooks -save-regs pq %{`)
-  w(`    reg p ""`)
-  args.forEach((k, i) => {
-    w(`    reg q ` + splice_map[k])
-    w(`    exec -no-hooks -buffer *expand* '` + (i == 0 ? '\\%di{' : 'i,') + `"` + k + `":"X"q<a-R>aX<esc>"p<a-z>aa"<esc>'`)
-  })
-  w(`    try %{ exec -no-hooks '"pzs["\\\\]<ret>i\\<esc>' }`)
-  w(`    try %{ exec -no-hooks '"pzs\\n<ret>c\\n<esc>' }`)
-  w(`    try %{ exec -no-hooks '"pzs\\t<ret>c\\t<esc>' }`)
-  w(`    try %{ exec -no-hooks '"pzsX\\z<ret>d' }`)
-  w(`  }`)
-  w(`  eval -no-hooks -buffer *expand* %{ write %opt{lsp_fifo} }`)
-  w(`}`)
-}
+const {def} = KakouneBuddy<Splice>(Details, '%opt{lsp_fifo}', x => console.log(x), handlers)
 
-function Uri(d: Pick<Splice, 'buffile'>): lsp.TextDocumentIdentifier {
+function Uri(d: Pick<Standard, 'buffile'>): lsp.TextDocumentIdentifier {
   return {
     uri: 'file:///' + d.buffile
   }
 }
 
-function Pos(d: Pick<Splice, 'cursor_line' | 'cursor_column' | 'buffile'>): lsp.TextDocumentPositionParams {
+function Pos(d: Pick<Standard, 'cursor_line' | 'cursor_column' | 'buffile'>): lsp.TextDocumentPositionParams {
   return {
     textDocument: Uri(d),
     position: {
@@ -149,10 +124,32 @@ function Pos(d: Pick<Splice, 'cursor_line' | 'cursor_column' | 'buffile'>): lsp.
   }
 }
 
-Register(
-  'lsp-hover -params 0..1',
-  splices(arg1, ...standard),
+const file_version: Record<string, number> = {}
+
+function Sync(m: Standard) {
+  if (!file_version[m.buffile]) {
+    const version = file_version[m.buffile] = 1
+    SendNotification(lsp.DidOpenTextDocumentNotification.type)({
+      textDocument: {
+        version,
+        languageId: m.filetype,
+        ...Uri(m),
+        text: m.selection
+      }
+    })
+  } else {
+    const version = file_version[m.buffile]++
+    SendNotification(lsp.DidChangeTextDocumentNotification.type)({
+      textDocument: { version, ...Uri(m) },
+      contentChanges: [{ text: m.selection }]
+    })
+  }
+}
+
+def('lsp-hover', '-params 0..1',
+  subkeys(Details, '1', ...StandardKeys),
   m => {
+    Sync(m)
     SendRequest(lsp.HoverRequest.type, Pos(m)).then(value => {
       console.group('hover')
       console.log(value.range)
