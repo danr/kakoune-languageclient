@@ -18,9 +18,11 @@ export function MessageKakoune({session, client, debug}: { session: string, clie
 }
 
 export type Expand = ((s: string) => string)
+export type Embed = ((s: string) => string)
 export type Parse<Splice, K extends keyof Splice> = ((s: string) => Splice[K])
 export interface Details<Splice, K extends keyof Splice> {
   expand: Expand,
+  embed: Embed,
   parse: Parse<Splice, K>
 }
 export type SpliceDetails<Splice extends Record<string, any>> = {
@@ -29,14 +31,14 @@ export type SpliceDetails<Splice extends Record<string, any>> = {
 
 export const splice =
   (expand: Expand) =>
-  <Splice, K extends keyof Splice>(k: K, parse: Parse<Splice, K>) =>
-  ({[k]: {expand, parse}} as Record<K, Details<Splice, K>>)
+  <Splice, K extends keyof Splice>(k: K, parse: Parse<Splice, K>, embed: (s: string) => string = s => s) =>
+  ({[k]: {expand, parse, embed}} as Record<K, Details<Splice, K>>)
 
-export const val = splice(s => '%val{' + s + '}')
-export const arg = splice(s => '%arg{' + s + '}')
-export const opt = splice(s => '%opt{' + s + '}')
-export const reg = splice(s => '%reg{' + s + '}')
-export const client_env = splice(s => '%val{client_env_' + s + '}')
+export const val = splice(s => '%val(' + s + ')')
+export const arg = splice(s => '%arg(' + s + ')')
+export const opt = splice(s => '%opt(' + s + ')')
+export const reg = splice(s => '%reg(' + s + ')')
+export const client_env = splice(s => '%val(client_env_' + s + ')')
 export const id = <A>(a: A) => a
 
 export const subkeys = <S extends Record<string, any>, K extends keyof S>(m: S, ...ks: K[]) => ks
@@ -60,7 +62,9 @@ def -hidden -allow-override lsp-json-escape %{
   try %{ exec '"pz;Ls.?${bs}K_<ret>d' }
 }`)
   function AskKakoune<K extends keyof Splice>(embed: (snippet: string) => string, command: string, args: K[], on: (m: Pick<Splice, K>) => void) {
-    const lsp_json_kvs = args.map(k => `lsp-json-key-value ${k} ${details[k].expand(k)}`).join('\n    ')
+    const lsp_json_kvs = args.map(k =>
+      details[k].embed(`lsp-json-key-value ${k} ${details[k].expand(k)}`)
+    ).join('\n    ')
     snippet_cb(embed(`
   eval -draft -no-hooks %(
     edit -debug -scratch *lsp-expand*
@@ -68,7 +72,6 @@ def -hidden -allow-override lsp-json-escape %{
   )
   eval -draft -no-hooks -save-regs pq %(
     reg p ''
-    exec '%'
     ${lsp_json_kvs}
     eval -buffer *lsp-expand* %(
       lsp-json-escape
@@ -110,7 +113,6 @@ export interface Splice {
   cursor_column: number,
   filetype: string,
   1: string,
-  '@': string
 }
 
 export const Details: SpliceDetails<Splice> = {
@@ -119,10 +121,9 @@ export const Details: SpliceDetails<Splice> = {
   ...val('timestamp', parseInt),
   ...val('cursor_line', parseInt),
   ...val('cursor_column', parseInt),
-  ...val('selection', id),
+  ...val('selection', id, s => `eval -draft %(exec '%'; ${s})`),
   ...opt('filetype', id),
   ...arg('1', id),
-  ...arg('@', id),
 }
 
 export const StandardKeys = subkeys(Details, 'buffile', 'client', 'timestamp', 'cursor_line', 'cursor_column', 'selection', 'filetype')

@@ -11,6 +11,7 @@ import * as libkak from './libkak'
 import { Splice, Details, subkeys, Standard, StandardKeys } from './libkak'
 
 const session = process.argv[2]
+const debug = true
 
 const { fifo, handlers } = libkak.CreateHandler()
 
@@ -74,25 +75,17 @@ function SendNotification<P, RO>(type: lsp.NotificationType<P, RO>): (params: P)
 
 SendRequest(lsp.InitializeRequest.type, {
   processId: process.pid,
-  rootUri: 'file:///home/dan/code/kakoune-languageclient/',
+  rootUri: 'file://' + process.cwd(),
   capabilities: {},
   trace: 'verbose'
 }).then(
   (x: any) => console.log('initialized:', x)
-  || SendNotification(lsp.DidOpenTextDocumentNotification.type)({
-    textDocument: {
-      uri: 'file:///home/dan/code/kakoune-languageclient/src/main.ts',
-      languageId: 'typescript',
-      version: 0,
-      text: 'const n: string = 1 + 2'
-    }
-  })
 )
 
 
 function Uri(d: Pick<Standard, 'buffile'>): lsp.TextDocumentIdentifier {
   return {
-    uri: 'file:///' + d.buffile
+    uri: 'file://' + d.buffile
   }
 }
 
@@ -128,11 +121,24 @@ function Sync(m: Standard) {
   }
 }
 
+function Hover({ contents }: lspt.Hover): string {
+  if (typeof contents == 'string') {
+    return contents
+  } else if (Array.isArray(contents)) {
+    return contents.length == 0 ? '' : Hover({ contents: contents[0]})
+  } else {
+    return contents.value
+  }
+}
+
 def('lsp-hover', '-params 0..1',
   subkeys(Details, '1', ...StandardKeys),
   m => {
+    console.log(m)
+    console.log(Pos(m))
     Sync(m)
     SendRequest(lsp.HoverRequest.type, Pos(m)).then(value => {
+      libkak.MessageKakoune({ session, client: m.client }, 'info "' + Hover(value) + '"')
       console.group('hover')
       console.log(value.range)
       console.log(value.contents)
