@@ -6,14 +6,11 @@
   "description": "Language server protocol client for the Kakoune text editor",
   "main": "./dist/bundle.js",
   "dependencies": {
-    "ramda": "^0.25.0",
-    "reactive-lens": "^0.3.0",
     "vscode-jsonrpc": "^3.5.0",
     "vscode-languageserver": "^3.5.0",
     "vscode-languageserver-types": "^3.5.0"
   },
   "devDependencies": {
-    "@types/ramda": "github:types/npm-ramda#dist",
     "@types/tape": "^4.2.31",
     "tape": "^4.8.0",
     "ts-node": "^3.3.0",
