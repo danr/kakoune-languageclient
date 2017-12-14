@@ -2,14 +2,61 @@ import * as fs from 'fs'
 import * as cp from 'child_process'
 import * as readline from 'readline'
 import * as path from 'path'
+import { Position } from 'vscode-languageserver-types'
+
+export type InfoPlacement = 'above' | 'below' | 'box' | 'docsclient'
+
+export function quote(msg: string) {
+  // https://github.com/mawww/kakoune/issues/1049
+  return "'" + msg.replace("\\'", "\\\\'").replace("'", "\\'").replace(/\\*$/, '') + "'"
+}
+
+export function make_kak_pos(pos: Position): string {
+  return `${pos.line + 1}.${pos.character + 1}`
+}
+
+export const zero: Position = ({
+  line: 0,
+  character: 0
+})
+
+export function info(msg: string, where: InfoPlacement='box', pos?: Position): string {
+  if (msg.trim() == '') {
+    return ''
+  }
+  switch (where) {
+    case 'docsclient':
+      const tmp = TempFile(msg)
+      return `eval -no-hooks -try-client %opt{docsclient} %{
+        edit! -scratch '*lsp-doc*'
+        exec \%d|cat<space> ${tmp}<ret>
+        exec \%|fmt<space> - %val{window_width} <space> -s <ret>
+        exec gg
+        set buffer filetype rst
+        try %{rmhl window/number_lines}
+        %sh{rm ${tmp}}
+      }`
+    case 'box': return `info ${quote(msg)}`
+    case 'above':
+    case 'below': return `info -placement ${where} -anchor ${make_kak_pos(pos || zero)} ${quote(msg)}`
+  }
+}
+
+export function TempFile(contents: string): string {
+  const filename = cp.execFileSync('mktemp', { encoding: 'utf8' }).trim()
+  fs.writeFileSync(filename, contents)
+  return filename
+}
 
 export function MessageKakoune({session, client, debug}: { session: string, client?: string, debug?: boolean }, message: string) {
   if (debug) {
     console.log({session, client, message})
   }
+  if (message.trim() == '') {
+    return
+  }
   if (client !== undefined) {
-    const tmp = cp.execFileSync('mktemp', { encoding: 'utf8' }).trim()
-    fs.writeFileSync(tmp, message)
+    const tmp = TempFile(message)
     MessageKakoune({ session, debug }, `eval -client ${client} %{source ${tmp}}; %sh{rm ${tmp}}`)
   } else {
     const p = cp.execFile('kak', ['-p', session])
@@ -40,6 +87,9 @@ export const opt = splice(s => '%opt(' + s + ')')
 export const reg = splice(s => '%reg(' + s + ')')
 export const client_env = splice(s => '%val(client_env_' + s + ')')
 export const id = <A>(a: A) => a
+
+/** does not handle list items with escaped colons due to missing lookbacks in js regex */
+export const colons = (s: string) => s.split(':')
 
 export const subkeys = <S extends Record<string, any>, K extends keyof S>(m: S, ...ks: K[]) => ks
 
@@ -113,6 +163,7 @@ export interface Splice {
   cursor_column: number,
   filetype: string,
   1: string,
+  completers: string[] // lsp-specific
 }
 
 export const Details: SpliceDetails<Splice> = {
@@ -124,6 +175,7 @@ export const Details: SpliceDetails<Splice> = {
   ...val('selection', id, s => `eval -draft %(exec '%'; ${s})`),
   ...opt('filetype', id),
   ...arg('1', id),
+  ...opt('completers', colons),
 }
 
 export const StandardKeys = subkeys(Details, 'buffile', 'client', 'timestamp', 'cursor_line', 'cursor_column', 'selection', 'filetype')
@@ -141,7 +193,14 @@ export function CreateHandler(options?: { debug?: boolean }) {
     (function go() {
       readline.createInterface({
         input: fs.createReadStream(fifo)
-      }).on('line', line => (on(line), go()))
+      }).on('line', line => {
+        try {
+          on(line)
+        } catch (e) {
+          console.error(e)
+        }
+        go()
+      })
     })()
   }
 
