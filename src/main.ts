@@ -9,16 +9,20 @@ import * as path from 'path';
 import * as cp from 'child_process';
 import * as process from 'process'
 import * as libkak from './libkak'
-import { Splice, Details, subkeys, Standard, StandardKeys } from './libkak'
+import { Splice, Details, subkeys } from './libkak'
 
-const session = process.argv[2]
+let session = process.argv[2] || ''
 const debug = true
 
-const { fifo, handlers } = libkak.CreateHandler()
+const { fifo, reply_fifo, handlers } = libkak.CreateHandler()
 
-const { def, ask } = libkak.KakouneBuddy<Splice>(Details, handlers, fifo, (x: string) => {
-  console.log(x)
-  libkak.MessageKakoune({ session }, x)
+const { def, ask, def_sync, ask_sync } = libkak.KakouneBuddy<Splice>(Details, handlers, fifo, reply_fifo, (x: string) => {
+  if (session) {
+    console.debug(x)
+    libkak.MessageKakoune({ session }, x)
+  } else {
+    console.log(x)
+  }
 })
 
 console.log('spawning')
@@ -104,8 +108,14 @@ function linelimit(limit: number, msg: string): string {
   return msg.split(/\n/).slice(0, limit).join('\n')
 }
 
+const StandardKeys = subkeys(Details, 'buffile', 'client', 'timestamp', 'cursor_line', 'cursor_column', 'selection', 'filetype')
+
+type StandardKeys = typeof StandardKeys[0]
+
+type Standard = Pick<Splice, StandardKeys>
+
 const pipe =
-  (m: Pick<libkak.Splice, libkak.StandardKeys>, msg: string) =>
+  (m: Pick<libkak.Splice, StandardKeys>, msg: string) =>
   libkak.MessageKakoune({ session, client: m.client }, msg)
 
 const file_version: Record<string, number> = {}
@@ -202,7 +212,7 @@ def('lsp-hover', '-params 0..1',
       const msg = linelimit(25, Hover(value))
       const where = (m[1] || 'box') as libkak.InfoPlacement
       const pos = value.range ? value.range.start : Pos(m).position
-      pipe(m, libkak.info(msg, where, pos))
+      pipe(m, libkak.info(msg, where, libkak.one_indexed(pos)))
     })
   })
 
@@ -215,7 +225,7 @@ def('lsp-signature-help', '-params 0..1',
       const msg = linelimit(25, Sig(value))
       const where = (m[1] || 'box') as libkak.InfoPlacement
       const pos = Pos(m).position
-      pipe(m, libkak.info(msg, where, pos))
+      pipe(m, libkak.info(msg, where, libkak.one_indexed(pos)))
     })
   })
 
