@@ -50,6 +50,10 @@ export const splice =
   <Splice, K extends keyof Splice>(k: K, parse: Parse<Splice, K>, embed: (s: string) => string = s => s) =>
   ({[k]: {expand, parse, embed}} as Record<K, Details<Splice, K>>)
 
+export const keyed =
+  <Splice, K extends keyof Splice>(k: K, expansion: string, parse: Parse<Splice, K>, embed: (s: string) => string = s => s) =>
+  splice(_ => expansion)<Splice, K>(k, parse, embed)
+
 export const val = splice(s => '%val(' + s + ')')
 export const arg = splice(s => '%arg(' + s + ')')
 export const opt = splice(s => '%opt(' + s + ')')
@@ -196,6 +200,7 @@ function handle_incoming(options?: { debug?: boolean }) {
   function teardown() {
     fs.unlinkSync(fifo)
     fs.unlinkSync(reply_fifo)
+    fs.rmdirSync(tmpdir)
   }
 
   return {fifo, reply_fifo, handlers, teardown}
@@ -240,7 +245,7 @@ export const Details: SpliceDetails<Splice> = {
   ...val('timestamp', parseInt),
   ...val('cursor_line', parseInt),
   ...val('cursor_column', parseInt),
-  ...splice(_ => '%val(selection)')('content', id, s => `eval -draft %(exec '%'; ${s})`),
+  ...keyed('content', '%val(selection)', id, s => `eval -draft %(exec '%'; ${s})`),
   ...val('selection', id),
   ...val('selection', id),
   ...val('selections', colons),
