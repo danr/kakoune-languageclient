@@ -6,7 +6,14 @@ import * as path from 'path'
 //////////////////////////////////////////////////////////////////////////////
 // Simple communication
 
-export function MessageKakoune({session, client, try_client, debug}: { session: string, client?: string, try_client?: boolean, debug?: boolean }, message: string) {
+export interface CommunicationOptions {
+  session: string,
+  client?: string,
+  try_client?: boolean,
+  debug?: boolean
+}
+
+export function MessageKakoune({session, client, try_client, debug}: CommunicationOptions, message: string) {
   if (debug) {
     console.log({session, client, message})
   }
@@ -56,9 +63,9 @@ export const colons = (s: string) => s.split(':')
 export const subkeys = <S extends Record<string, any>, K extends keyof S>(m: S, ...ks: K[]) => ks
 
 //////////////////////////////////////////////////////////////////////////////
-// Buddy communication
+// Messages to kakoune
 
-export const KakouneBuddy =
+const ask_kakoune =
   <Splice>(
     details: SpliceDetails<Splice>,
     handler_map: Record<string, (p: Partial<Record<keyof Splice, string>>) => void>,
@@ -145,9 +152,9 @@ export const KakouneBuddy =
 }
 
 //////////////////////////////////////////////////////////////////////////////
-// Handle buddy communication
+// Handle incoming requsts and replies from kakoune
 
-export function CreateHandler(options?: { debug?: boolean }) {
+function handle_incoming(options?: { debug?: boolean }) {
   const tmpdir = cp.execFileSync('mktemp', ['-d'], { encoding: 'utf8' }).trim()
   const fifo = path.join(tmpdir, 'fifo')
   const reply_fifo = path.join(tmpdir, 'replyfifo')
@@ -192,6 +199,16 @@ export function CreateHandler(options?: { debug?: boolean }) {
   }
 
   return {fifo, reply_fifo, handlers, teardown}
+}
+
+//////////////////////////////////////////////////////////////////////////////
+// Initiate the communication
+
+export function Init<Splice>(details: SpliceDetails<Splice>, options: CommunicationOptions) {
+  const h = handle_incoming(options)
+  const snippet_cb = (s: string) => MessageKakoune(options, s)
+  const kak = ask_kakoune(details, h.handlers, h.fifo, h.reply_fifo, snippet_cb)
+  return {...kak, teardown: h.teardown}
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -319,6 +336,7 @@ export function TempFile(contents: string): string {
   return filename
 }
 
-export function Headless(ui: string='dummy'): cp.ChildProcess {
-  return cp.execFile('kak', ['-n', '-ui', ui])
+export const Headless = (ui: string='dummy') => {
+  const kak  = cp.execFile('kak', ['-n', '-ui', ui])
+  return {pid: kak.pid, kill() { kak.kill() }}
 }
