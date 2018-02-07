@@ -7,6 +7,6 @@ Work in progress
 ```
 yarn
 yarn run test
-yarn run example
-yarn run main
+yarn run example <kak-session>
+yarn run main <kak-session>
 ```

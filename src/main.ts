@@ -13,6 +13,11 @@ import {Splice, Details, subkeys} from './libkak'
 import * as util from 'util'
 util.inspect.defaultOptions.depth = 5
 
+if (!process.argv[2]) {
+  console.error('Need one argument: the kak session to connect to')
+  process.exit(1)
+}
+
 let session = process.argv[2] || ''
 const debug = true
 
