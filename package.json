@@ -15,12 +15,13 @@
     "faucet": "0.0.1",
     "prettier": "^1.10.2",
     "tape": "^4.8.0",
-    "ts-node": "^3.3.0",
-    "typescript": "^2.6.1"
+    "ts-node": "^4.1.0",
+    "typescript": "^2.7.1"
   },
   "scripts": {
     "test": "ts-node test/libkak.test.ts | faucet",
     "example": "ts-node src/libkak-example.ts",
+    "main": "ts-node src/main.ts",
     "prettier": "prettier --list-different --write \"{src,test}/*.ts\""
   },
   "prettier": {
