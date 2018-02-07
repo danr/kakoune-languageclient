@@ -16,12 +16,11 @@ util.inspect.defaultOptions.depth = 5
 let session = process.argv[2] || ''
 const debug = true
 
-const kak = libkak.Init(
-  Details, {
-    session,
-    client: 'unnamed0',
-    debug: true,
-  })
+const kak = libkak.Init(Details, {
+  session,
+  client: 'unnamed0',
+  debug: true,
+})
 
 console.log('spawning')
 const child = cp.spawn('javascript-typescript-stdio', [], {
@@ -166,9 +165,10 @@ function Sig(value: lspt.SignatureHelp) {
         return [
           '> ' + sig.label,
           sig.documentation || '',
-          ...parameters.map((param, j) =>
-            (j == value.activeParameter ? '> ' : '  ') + param.label + ' ' + param.documentation
-          )
+          ...parameters.map(
+            (param, j) =>
+              (j == value.activeParameter ? '> ' : '  ') + param.label + ' ' + param.documentation
+          ),
         ].join('\n  ')
       } else {
         return sig.label
@@ -213,14 +213,15 @@ function CompleteItem(item: lspt.CompletionItem, maxlen: number): string {
   return [insert, doc, entry].map(x => x.replace(/([|:])/g, s => '\\' + s)).join('|')
 }
 
-const reply = ({client}: {client: string}, message: string) => libkak.MessageKakoune({session, client, debug: true}, message)
+const reply = ({client}: {client: string}, message: string) =>
+  libkak.MessageKakoune({session, client, debug: true}, message)
 
 kak.def('lsp-hover', '-params 0..1', subkeys(Details, '1', ...StandardKeys), async m => {
   Sync(m)
   const value = await SendRequest(lsp.HoverRequest.type, Pos(m))
   console.dir({hover: value})
   const msg = linelimit(25, Hover(value))
-  const where = m[1] as libkak.InfoPlacement || 'info'
+  const where = (m[1] as libkak.InfoPlacement) || 'info'
   const pos = value.range ? value.range.start : Pos(m).position
   console.log({msg, where, pos})
   reply(m, libkak.info(msg, where, libkak.one_indexed(pos)))
@@ -231,11 +232,10 @@ kak.def('lsp-signature-help', '-params 0..1', subkeys(Details, '1', ...StandardK
   const value = await SendRequest(lsp.SignatureHelpRequest.type, Pos(m))
   console.dir({sig: value})
   const msg = linelimit(25, Sig(value))
-  const where = m[1] as libkak.InfoPlacement || 'info'
+  const where = (m[1] as libkak.InfoPlacement) || 'info'
   const pos = Pos(m).position
   reply(m, libkak.info(msg, where, libkak.one_indexed(pos)))
 })
-
 ;`enable with something like:
 
   hook -group lsp buffer InsertChar [.] '<a-;>: lsp-complete<ret>'

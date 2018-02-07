@@ -217,7 +217,12 @@ function handle_incoming(options?: {debug?: boolean}) {
         throw err
       } else {
         const maxlen = 160
-        debug && console.log('From kakoune on fifo:', line.slice(0, maxlen), `(capped from ${line.length} to maxlen chars)`)
+        debug &&
+          console.log(
+            'From kakoune on fifo:',
+            line.slice(0, maxlen),
+            `(capped from ${line.length} to maxlen chars)`
+          )
         const m = JSON.parse(line)
         const h = (handlers as any)[m['command']]
         h(m)
