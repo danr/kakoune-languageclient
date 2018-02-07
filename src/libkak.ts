@@ -16,9 +16,7 @@ export function MessageKakoune(
   {session, client, try_client, debug}: CommunicationOptions,
   message: string
 ) {
-  if (debug) {
-    console.log({session, client, message})
-  }
+  debug && console.error({session, client, message})
   if (message.trim() == '') {
     return
   }
@@ -218,7 +216,8 @@ function handle_incoming(options?: {debug?: boolean}) {
         debug && console.error('read_loop error:', {err, torn_down})
         throw err
       } else {
-        debug && console.log('Message from kakoune on fifo:', line)
+        const maxlen = 160
+        debug && console.log('From kakoune on fifo:', line.slice(0, maxlen), `(capped from ${line.length} to maxlen chars)`)
         const m = JSON.parse(line)
         const h = (handlers as any)[m['command']]
         h(m)
