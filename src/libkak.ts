@@ -7,13 +7,16 @@ import * as path from 'path'
 // Simple communication
 
 export interface CommunicationOptions {
-  session: string | number,
-  client?: string,
-  try_client?: boolean,
+  session: string | number
+  client?: string
+  try_client?: boolean
   debug?: boolean
 }
 
-export function MessageKakoune({session, client, try_client, debug}: CommunicationOptions, message: string) {
+export function MessageKakoune(
+  {session, client, try_client, debug}: CommunicationOptions,
+  message: string
+) {
   if (debug) {
     console.log({session, client, message})
   }
@@ -22,8 +25,8 @@ export function MessageKakoune({session, client, try_client, debug}: Communicati
   }
   if (client !== undefined) {
     const tmp = TempFile(message)
-    const flag = (try_client === false) ? '-try-client' : '-client'
-    MessageKakoune({ session, debug }, `eval ${flag} ${client} %{%sh{cat ${tmp}; rm ${tmp}}}`)
+    const flag = try_client === false ? '-try-client' : '-client'
+    MessageKakoune({session, debug}, `eval ${flag} ${client} %{%sh{cat ${tmp}; rm ${tmp}}}`)
   } else {
     const p = child_process.execFile('kak', ['-p', session + ''])
     p.stdin.end(message)
@@ -37,22 +40,26 @@ export type Expand = ((s: string) => string)
 export type Embed = ((s: string) => string)
 export type Parse<Splice, K extends keyof Splice> = ((s: string) => Splice[K])
 export interface Details<Splice, K extends keyof Splice> {
-  expand: Expand,
-  embed: Embed,
+  expand: Expand
+  embed: Embed
   parse: Parse<Splice, K>
 }
 export type SpliceDetails<Splice extends Record<string, any>> = {
   [K in keyof Splice]: Details<Splice, K>
 }
 
-export const splice =
-  (expand: Expand) =>
-  <Splice, K extends keyof Splice>(k: K, parse: Parse<Splice, K>, embed: (s: string) => string = s => s) =>
-  ({[k as string]: {expand, parse, embed}} as any as Record<K, Details<Splice, K>>)
+export const splice = (expand: Expand) => <Splice, K extends keyof Splice>(
+  k: K,
+  parse: Parse<Splice, K>,
+  embed: (s: string) => string = s => s
+) => (({[k as string]: {expand, parse, embed}} as any) as Record<K, Details<Splice, K>>)
 
-export const keyed =
-  <Splice, K extends keyof Splice>(k: K, expansion: string, parse: Parse<Splice, K>, embed: (s: string) => string = s => s) =>
-  splice(_ => expansion)<Splice, K>(k, parse, embed)
+export const keyed = <Splice, K extends keyof Splice>(
+  k: K,
+  expansion: string,
+  parse: Parse<Splice, K>,
+  embed: (s: string) => string = s => s
+) => splice(_ => expansion)<Splice, K>(k, parse, embed)
 
 export const val = splice(s => '%val(' + s + ')')
 export const arg = splice(s => '%arg(' + s + ')')
@@ -69,14 +76,14 @@ export const subkeys = <S extends Record<string, any>, K extends keyof S>(m: S, 
 //////////////////////////////////////////////////////////////////////////////
 // Messages to kakoune
 
-const ask_kakoune =
-  <Splice>(
-    details: SpliceDetails<Splice>,
-    handler_map: Record<string, (p: Partial<Record<keyof Splice, string>>) => void>,
-    fifo: string,
-    reply_fifo: string, // for synchronous asks
-    snippet_cb: (kak_snippet: string) => void) => {
-  const bs = "\\"
+const ask_kakoune = <Splice>(
+  details: SpliceDetails<Splice>,
+  handler_map: Record<string, (p: Partial<Record<keyof Splice, string>>) => void>,
+  fifo: string,
+  reply_fifo: string, // for synchronous asks
+  snippet_cb: (kak_snippet: string) => void
+) => {
+  const bs = '\\'
   snippet_cb(`
     # mutates q register
     def -hidden -allow-override libkak-json-key-value -params 2 %{
@@ -90,11 +97,17 @@ const ask_kakoune =
       try %{ exec '"pzs${bs}t<ret>c${bs}t<esc>' }
       try %{ exec '"pz;Ls.?${bs}K_<ret>d' }
     }`)
-  function AskKakoune<K extends keyof Splice>(embed: (snippet: string) => string, command: string, args: K[], on: (m: Pick<Splice, K>) => void) {
-    const lsp_json_kvs = args.map(k =>
-      details[k].embed(`libkak-json-key-value ${k} ${details[k].expand(k)}`)
-    ).join('\n    ')
-    snippet_cb(embed(`
+  function AskKakoune<K extends keyof Splice>(
+    embed: (snippet: string) => string,
+    command: string,
+    args: K[],
+    on: (m: Pick<Splice, K>) => void
+  ) {
+    const lsp_json_kvs = args
+      .map(k => details[k].embed(`libkak-json-key-value ${k} ${details[k].expand(k)}`))
+      .join('\n    ')
+    snippet_cb(
+      embed(`
       eval -draft -no-hooks %(
         edit -debug -scratch *libkak-expand*
         exec '%di{"command":"${command}"'
@@ -109,7 +122,8 @@ const ask_kakoune =
           exec \\% |tee <space> ${fifo} <ret>
           # write ${fifo}
         )
-      )`))
+      )`)
+    )
     handler_map[command] = (parsed_json_line: Partial<Record<keyof Splice, string>>) => {
       const parsed_rhss: Pick<Splice, K> = {} as any
       args.forEach((k: K) => {
@@ -122,7 +136,12 @@ const ask_kakoune =
       on(parsed_rhss)
     }
   }
-  function AskKakouneWithReply<K extends keyof Splice>(embed: (snippet: string) => string, command: string, args: K[], on: (m: Pick<Splice, K>) => string) {
+  function AskKakouneWithReply<K extends keyof Splice>(
+    embed: (snippet: string) => string,
+    command: string,
+    args: K[],
+    on: (m: Pick<Splice, K>) => string
+  ) {
     return AskKakoune(s => embed(s + `; %sh{ cat ${reply_fifo} }`), command, args, m => {
       let reply = `echo -debug "libkak.ts AskKakouneWithReply request ${command} failed"`
       try {
@@ -136,57 +155,77 @@ const ask_kakoune =
   return {
     ask<K extends keyof Splice>(args: K[], on: (m: Pick<Splice, K>) => void) {
       const command_name = '__ask__' + ask_counter++
-      AskKakoune(id, command_name, args,
-        m => (on(m), delete handler_map[command_name]))
+      AskKakoune(id, command_name, args, m => (on(m), delete handler_map[command_name]))
     },
     ask_with_reply<K extends keyof Splice>(args: K[], on: (m: Pick<Splice, K>) => string) {
       const command_name = '__ask__' + ask_counter++
-      AskKakouneWithReply(id, command_name, args,
-        m => { const s = on(m); delete handler_map[command_name]; return s })
+      AskKakouneWithReply(id, command_name, args, m => {
+        const s = on(m)
+        delete handler_map[command_name]
+        return s
+      })
     },
-    def<K extends keyof Splice>(command_name: string, params: string, args: K[], on: (m: Pick<Splice, K>) => void) {
-      AskKakoune(s => `def -allow-override ${command_name} ${params} %(` + s + `)`,
-        command_name, args, on)
+    def<K extends keyof Splice>(
+      command_name: string,
+      params: string,
+      args: K[],
+      on: (m: Pick<Splice, K>) => void
+    ) {
+      AskKakoune(
+        s => `def -allow-override ${command_name} ${params} %(` + s + `)`,
+        command_name,
+        args,
+        on
+      )
     },
-    def_with_reply<K extends keyof Splice>(command_name: string, params: string, args: K[], on: (m: Pick<Splice, K>) => string) {
-      AskKakouneWithReply(s => `def -allow-override ${command_name} ${params} %(` + s + `)`,
-        command_name, args, on)
+    def_with_reply<K extends keyof Splice>(
+      command_name: string,
+      params: string,
+      args: K[],
+      on: (m: Pick<Splice, K>) => string
+    ) {
+      AskKakouneWithReply(
+        s => `def -allow-override ${command_name} ${params} %(` + s + `)`,
+        command_name,
+        args,
+        on
+      )
     },
-    msg: snippet_cb
+    msg: snippet_cb,
   }
 }
 
 //////////////////////////////////////////////////////////////////////////////
 // Handle incoming requsts and replies from kakoune
 
-function handle_incoming(options?: { debug?: boolean }) {
-  const tmpdir = child_process.execFileSync('mktemp', ['-d'], { encoding: 'utf8' }).trim()
+function handle_incoming(options?: {debug?: boolean}) {
+  const tmpdir = child_process.execFileSync('mktemp', ['-d'], {encoding: 'utf8'}).trim()
   const fifo = path.join(tmpdir, 'fifo')
   const reply_fifo = path.join(tmpdir, 'replyfifo')
   child_process.execFileSync('mkfifo', [fifo])
   child_process.execFileSync('mkfifo', [reply_fifo])
-  const debug = options && options.debug || false
+  const debug = (options && options.debug) || false
   debug && console.error('created fifos:', {fifo, reply_fifo})
   debug && console.error({readdir: fs.readdirSync(tmpdir)})
 
   let torn_down = false
   const handlers = {}
   ;(function read_loop() {
-  fs.readFile(fifo, {encoding: 'utf8'}, (err, line: string) => {
-    if (err) {
-      if (torn_down && err.code == 'ENOENT') {
-        return
+    fs.readFile(fifo, {encoding: 'utf8'}, (err, line: string) => {
+      if (err) {
+        if (torn_down && err.code == 'ENOENT') {
+          return
+        }
+        debug && console.error('read_loop error:', {err, torn_down})
+        throw err
+      } else {
+        debug && console.log('Message from kakoune on fifo:', line)
+        const m = JSON.parse(line)
+        const h = (handlers as any)[m['command']]
+        h(m)
       }
-      debug && console.error('read_loop error:', {err, torn_down})
-      throw err
-    } else {
-      debug && console.log('Message from kakoune on fifo:', line)
-      const m = JSON.parse(line)
-      const h = (handlers as any)[m['command']]
-      h(m)
-    }
-    read_loop()
-  })
+      read_loop()
+    })
   })()
 
   function teardown() {
@@ -214,21 +253,21 @@ export function Init<Splice>(details: SpliceDetails<Splice>, options: Communicat
 // Standard splice type
 
 export interface Splice {
-  buffile: string,
-  timestamp: number,
-  session: string,
-  client: string,
+  buffile: string
+  timestamp: number
+  session: string
+  client: string
   /** buffer content */
-  content: string,
-  selection: string,
+  content: string
+  selection: string
   /** todo: split at non backslash-escaped : */
-  selections: string[],
-  selection_desc: Cursor,
-  selections_desc: Cursor[],
-  cursor_line: number,
-  cursor_column: number,
-  filetype: string,
-  1: string,
+  selections: string[]
+  selection_desc: Cursor
+  selections_desc: Cursor[]
+  cursor_line: number
+  cursor_column: number
+  filetype: string
+  1: string
   completers: string[]
 }
 
@@ -244,7 +283,7 @@ export const Details: SpliceDetails<Splice> = {
   ...val('selection', id),
   ...val('selections', colons),
   ...val('selection_desc', parse_cursor),
-  ...val('selections_desc', (s) => s.split(':').map(parse_cursor)),
+  ...val('selections_desc', s => s.split(':').map(parse_cursor)),
   ...opt('filetype', id),
   ...arg('1', id),
   ...opt('completers', colons),
@@ -255,11 +294,18 @@ export const Details: SpliceDetails<Splice> = {
 
 export function quote(msg: string) {
   // https://github.com/mawww/kakoune/issues/1049
-  return "'" + msg.replace("\\'", "\\\\'").replace("'", "\\'").replace(/\\*$/, '') + "'"
+  return (
+    "'" +
+    msg
+      .replace("\\'", "\\\\'")
+      .replace("'", "\\'")
+      .replace(/\\*$/, '') +
+    "'"
+  )
 }
 
 export interface Pos {
-  line: number,
+  line: number
   column: number
 }
 
@@ -272,16 +318,19 @@ export function parse_pos(s: string): Pos {
   return {line, column}
 }
 
-export const zero: Pos = ({
+export const zero: Pos = {
   line: 1,
-  column: 1
+  column: 1,
+}
+
+export const zero_indexed = (p: Pos) => ({line: p.line - 1, character: p.column - 1})
+export const one_indexed = (p: {line: number; character: number}): Pos => ({
+  line: p.line + 1,
+  column: p.character + 1,
 })
 
-export const zero_indexed = (p: Pos) => ({line: p.line-1, character: p.column-1})
-export const one_indexed = (p: {line: number, character: number}): Pos => ({line: p.line+1, column: p.character+1})
-
 export interface Cursor {
-  anchor: Pos,
+  anchor: Pos
   head: Pos
 }
 
@@ -294,7 +343,7 @@ export function parse_cursor(s: string): Cursor {
   return {anchor, head}
 }
 
-export function menu(options: {title: string, command: string}[]) {
+export function menu(options: {title: string; command: string}[]) {
   if (options.length == 1) {
     return options[0].command
   } else {
@@ -304,7 +353,7 @@ export function menu(options: {title: string, command: string}[]) {
 
 export type InfoPlacement = 'above' | 'below' | 'info' | 'docsclient'
 
-export function info(msg: string, where: InfoPlacement='info', pos?: Pos): string {
+export function info(msg: string, where: InfoPlacement = 'info', pos?: Pos): string {
   if (msg.trim() == '') {
     return ''
   }
@@ -320,9 +369,11 @@ export function info(msg: string, where: InfoPlacement='info', pos?: Pos): strin
         try %{rmhl window/number_lines}
         %sh{rm ${tmp}}
       }`
-    case 'info': return `info ${quote(msg)}`
+    case 'info':
+      return `info ${quote(msg)}`
     case 'above':
-    case 'below': return `info -placement ${where} -anchor ${format_pos(pos || zero)} ${quote(msg)}`
+    case 'below':
+      return `info -placement ${where} -anchor ${format_pos(pos || zero)} ${quote(msg)}`
   }
 }
 
@@ -330,12 +381,17 @@ export function info(msg: string, where: InfoPlacement='info', pos?: Pos): strin
 // File utils
 
 export function TempFile(contents: string): string {
-  const filename = child_process.execFileSync('mktemp', { encoding: 'utf8' }).trim()
+  const filename = child_process.execFileSync('mktemp', {encoding: 'utf8'}).trim()
   fs.writeFileSync(filename, contents)
   return filename
 }
 
-export const Headless = (ui: string='dummy') => {
-  const kak  = child_process.execFile('kak', ['-n', '-ui', ui])
-  return {pid: kak.pid, kill() { kak.kill() }}
+export const Headless = (ui: string = 'dummy') => {
+  const kak = child_process.execFile('kak', ['-n', '-ui', ui])
+  return {
+    pid: kak.pid,
+    kill() {
+      kak.kill()
+    },
+  }
 }
