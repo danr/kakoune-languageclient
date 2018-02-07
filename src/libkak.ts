@@ -1,13 +1,13 @@
 import * as fs from 'fs'
-import * as cp from 'child_process'
-import * as readline from 'readline'
+import * as child_process from 'child_process'
+import * as line_reader from 'line-reader'
 import * as path from 'path'
 
 //////////////////////////////////////////////////////////////////////////////
 // Simple communication
 
 export interface CommunicationOptions {
-  session: string,
+  session: string | number,
   client?: string,
   try_client?: boolean,
   debug?: boolean
@@ -25,7 +25,7 @@ export function MessageKakoune({session, client, try_client, debug}: Communicati
     const flag = (try_client === false) ? '-try-client' : '-client'
     MessageKakoune({ session, debug }, `eval ${flag} ${client} %{%sh{cat ${tmp}; rm ${tmp}}}`)
   } else {
-    const p = cp.execFile('kak', ['-p', session])
+    const p = child_process.execFile('kak', ['-p', session + ''])
     p.stdin.end(message)
   }
 }
@@ -48,7 +48,7 @@ export type SpliceDetails<Splice extends Record<string, any>> = {
 export const splice =
   (expand: Expand) =>
   <Splice, K extends keyof Splice>(k: K, parse: Parse<Splice, K>, embed: (s: string) => string = s => s) =>
-  ({[k]: {expand, parse, embed}} as Record<K, Details<Splice, K>>)
+  ({[k as string]: {expand, parse, embed}} as any as Record<K, Details<Splice, K>>)
 
 export const keyed =
   <Splice, K extends keyof Splice>(k: K, expansion: string, parse: Parse<Splice, K>, embed: (s: string) => string = s => s) =>
@@ -105,8 +105,9 @@ const ask_kakoune =
         eval -buffer *libkak-expand* %(
           libkak-json-escape
           exec gea}<esc>
-          # exec % |tee <space> ${fifo} <ret>
-          write ${fifo}
+          echo -debug fifo:${fifo}
+          exec \\% |tee <space> ${fifo} <ret>
+          # write ${fifo}
         )
       )`))
     handler_map[command] = (parsed_json_line: Partial<Record<keyof Splice, string>>) => {
@@ -122,7 +123,7 @@ const ask_kakoune =
     }
   }
   function AskKakouneWithReply<K extends keyof Splice>(embed: (snippet: string) => string, command: string, args: K[], on: (m: Pick<Splice, K>) => string) {
-    return AskKakoune(s => embed(s + `; source ${reply_fifo}`), command, args, m => {
+    return AskKakoune(s => embed(s + `; %sh{ cat ${reply_fifo} }`), command, args, m => {
       let reply = `echo -debug "libkak.ts AskKakouneWithReply request ${command} failed"`
       try {
         reply = on(m)
@@ -159,45 +160,38 @@ const ask_kakoune =
 // Handle incoming requsts and replies from kakoune
 
 function handle_incoming(options?: { debug?: boolean }) {
-  const tmpdir = cp.execFileSync('mktemp', ['-d'], { encoding: 'utf8' }).trim()
+  const tmpdir = child_process.execFileSync('mktemp', ['-d'], { encoding: 'utf8' }).trim()
   const fifo = path.join(tmpdir, 'fifo')
   const reply_fifo = path.join(tmpdir, 'replyfifo')
-  cp.execFileSync('mkfifo', [fifo])
-  cp.execFileSync('mkfifo', [reply_fifo])
+  child_process.execFileSync('mkfifo', [fifo])
+  child_process.execFileSync('mkfifo', [reply_fifo])
+  const debug = options && options.debug || false
+  debug && console.error('created fifos:', {fifo, reply_fifo})
+  debug && console.error({readdir: fs.readdirSync(tmpdir)})
 
-  function Readline(on: (line: string) => void) {
-    (function go() {
-      const input = fs.createReadStream(fifo)
-      input.on('error', error => {
-        if (error.code != 'ENOENT') {
-          throw error
-        }
-      })
-      input.on('readable', () => {
-        readline.createInterface({ input }).on('line', line => {
-          try {
-            on(line)
-          } catch (e) {
-            console.error(e)
-          }
-          go()
-        })
-      })
-    })()
-  }
-
+  let torn_down = false
   const handlers = {}
-
-  Readline(line => {
-    if (options && options.debug) {
-      console.log(line)
+  ;(function read_loop() {
+  fs.readFile(fifo, {encoding: 'utf8'}, (err, line: string) => {
+    if (err) {
+      if (torn_down && err.code == 'ENOENT') {
+        return
+      }
+      debug && console.error('read_loop error:', {err, torn_down})
+      throw err
+    } else {
+      debug && console.log('Message from kakoune on fifo:', line)
+      const m = JSON.parse(line)
+      const h = (handlers as any)[m['command']]
+      h(m)
     }
-    const m = JSON.parse(line)
-    const h = (handlers as any)[m['command']]
-    h(m)
+    read_loop()
   })
+  })()
 
   function teardown() {
+    debug && console.error('teardown')
+    torn_down = true
     fs.unlinkSync(fifo)
     fs.unlinkSync(reply_fifo)
     fs.rmdirSync(tmpdir)
@@ -217,7 +211,7 @@ export function Init<Splice>(details: SpliceDetails<Splice>, options: Communicat
 }
 
 //////////////////////////////////////////////////////////////////////////////
-// Standard buddy types
+// Standard splice type
 
 export interface Splice {
   buffile: string,
@@ -336,12 +330,12 @@ export function info(msg: string, where: InfoPlacement='info', pos?: Pos): strin
 // File utils
 
 export function TempFile(contents: string): string {
-  const filename = cp.execFileSync('mktemp', { encoding: 'utf8' }).trim()
+  const filename = child_process.execFileSync('mktemp', { encoding: 'utf8' }).trim()
   fs.writeFileSync(filename, contents)
   return filename
 }
 
 export const Headless = (ui: string='dummy') => {
-  const kak  = cp.execFile('kak', ['-n', '-ui', ui])
+  const kak  = child_process.execFile('kak', ['-n', '-ui', ui])
   return {pid: kak.pid, kill() { kak.kill() }}
 }

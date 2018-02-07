@@ -19,8 +19,7 @@
   },
   "scripts": {
     "test": "ts-node test/libkak.test.ts | faucet",
-    "prepublishOnly": "npm run build",
-    "build": "tsc"
+    "example": "ts-node src/libkak-example.ts"
   },
   "keywords": [
     "kakoune",

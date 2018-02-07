@@ -2,14 +2,15 @@ import * as process from 'process'
 import * as libkak from './libkak'
 import { Splice, Details } from './libkak'
 
-let session = process.argv[2]
+if (!process.argv[2]) {
+  console.error('Need one argument: the kak session to connect to')
+  process.exit(1)
+}
 
-const { fifo, reply_fifo, handlers } = libkak.CreateHandler()
+const session = process.argv[2]
 
-const { def, ask, def_sync, ask_sync } = libkak.KakouneBuddy<Splice>(Details, handlers, fifo, reply_fifo, (x: string) => {
-  console.debug(x)
-  libkak.MessageKakoune({ session }, x)
-})
+const { def, ask, def_with_reply, ask_with_reply } =
+  libkak.Init(Details, {session, client: 'unnamed0', debug: true})
 
 def('what-buffile', '', ['buffile'], m => console.log(m.buffile))
 def('what-selection', '', ['selection'], m => console.log(m.selection))
@@ -24,7 +25,7 @@ def('js-eval', '-params 1', ['1', 'client'], m => {
   }
 })
 
-def_sync('js-eval-sync', '-params 1', ['1', 'client'], m => {
+def_with_reply('js-eval-sync', '-params 1', ['1', 'client'], m => {
   console.log(m)
   const res = eval(m[1])
   console.log(res)
