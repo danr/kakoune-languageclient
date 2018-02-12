@@ -5,15 +5,16 @@ import * as path from 'path'
 //////////////////////////////////////////////////////////////////////////////
 // Simple communication
 
-export interface CommunicationOptions {
+export interface MessageSettings {
   session: string | number
   client?: string
   try_client?: boolean
   debug?: boolean
 }
 
+/** Note: this is available as the `msg` property on Kak objects */
 export function MessageKakoune(
-  {session, client, try_client, debug}: CommunicationOptions,
+  {session, client, try_client, debug}: MessageSettings,
   message: string
 ) {
   debug && console.error({session, client, message})
@@ -73,37 +74,105 @@ export const subkeys = <S extends Record<string, any>, K extends keyof S>(m: S, 
 //////////////////////////////////////////////////////////////////////////////
 // Messages to kakoune
 
-const ask_kakoune = <Splice>(
-  details: SpliceDetails<Splice>,
-  handler_map: Record<string, (p: Partial<Record<keyof Splice, string>>) => void>,
-  fifo: string,
-  reply_fifo: string, // for synchronous asks
-  snippet_cb: (kak_snippet: string) => void
-) => {
-  const bs = '\\'
-  snippet_cb(`
-    # mutates q register
-    def -hidden -allow-override libkak-json-key-value -params 2 %{
-      reg q %arg{2}
-      exec -buffer *libkak-expand* 'gea,"' %arg{1} '":"__"<esc>hh"q<a-R>"p<a-Z>a'
+export class Kak<Splice> {
+  static Init<Splice>(details: SpliceDetails<Splice>, options: MessageSettings): Kak<Splice> {
+    //////////////////////////////////////////////////////////////////////////////
+    // Handle incoming requests and replies from kakoune
+    const tmpdir = child_process.execFileSync('mktemp', ['-d'], {encoding: 'utf8'}).trim()
+    const fifo = path.join(tmpdir, 'fifo')
+    const reply_fifo = path.join(tmpdir, 'replyfifo')
+    child_process.execFileSync('mkfifo', [fifo])
+    child_process.execFileSync('mkfifo', [reply_fifo])
+    const debug = options && options.debug
+    debug && console.error('created fifos:', {fifo, reply_fifo})
+    debug && console.error({readdir: fs.readdirSync(tmpdir)})
+
+    let torn_down = false
+    const handlers: Record<string, any> = {}
+    ;(function read_loop() {
+      fs.readFile(fifo, {encoding: 'utf8'}, (err, lines: string) => {
+        if (err) {
+          if (torn_down && err.code == 'ENOENT') {
+            return
+          }
+          debug && console.error('read_loop error:', {err, torn_down})
+          throw err
+        } else {
+          lines.split(/\n/g).forEach((line, i) => {
+            if (line.length == 0) {
+              debug && console.error('length 0:', {line, i})
+              return
+            }
+            if (i > 0) {
+              debug && console.error('multipacket', {line, i})
+            }
+            const maxlen = 160
+            debug &&
+              console.error(
+                'From kakoune on fifo:',
+                line.slice(0, maxlen),
+                line.length > maxlen ? `(capped from ${line.length} to ${maxlen} chars)` : ``
+              )
+            try {
+              const m = JSON.parse(line)
+              const h = (handlers as any)[m['command']]
+              h(m)
+            } catch (e) {
+              console.error(e.toString(), {line})
+            }
+          })
+        }
+        read_loop()
+      })
+    })()
+
+    function teardown() {
+      debug && console.error('teardown')
+      torn_down = true
+      fs.unlinkSync(fifo)
+      fs.unlinkSync(reply_fifo)
+      fs.rmdirSync(tmpdir)
     }
-    # mutates p register
-    def -hidden -allow-override libkak-json-escape %{
-      try %{ exec '"pzs["${bs}${bs}]<ret>i${bs}<esc>' }
-      try %{ exec '"pzs${bs}n<ret>c${bs}n<esc>' }
-      try %{ exec '"pzs${bs}t<ret>c${bs}t<esc>' }
-      try %{ exec '"pz;Ls.?${bs}K_<ret>d' }
-    }`)
-  function AskKakoune<K extends keyof Splice>(
+
+    return new Kak(details, handlers, fifo, reply_fifo, teardown, (s: string) =>
+      MessageKakoune(options, s)
+    )
+  }
+
+  private constructor(
+    private readonly details: SpliceDetails<Splice>,
+    private readonly handlers: Record<string, any>,
+    private readonly fifo: string,
+    private readonly reply_fifo: string,
+    public readonly teardown: () => void,
+    public readonly msg: (s: string) => void
+  ) {
+    const bs = '\\'
+    msg(`
+      # mutates q register
+      def -hidden -allow-override libkak-json-key-value -params 2 %{
+        reg q %arg{2}
+        exec -buffer *libkak-expand* 'gea,"' %arg{1} '":"__"<esc>hh"q<a-R>"p<a-Z>a'
+      }
+      # mutates p register
+      def -hidden -allow-override libkak-json-escape %{
+        try %{ exec '"pzs["${bs}${bs}]<ret>i${bs}<esc>' }
+        try %{ exec '"pzs${bs}n<ret>c${bs}n<esc>' }
+        try %{ exec '"pzs${bs}t<ret>c${bs}t<esc>' }
+        try %{ exec '"pz;Ls.?${bs}K_<ret>d' }
+      }`)
+  }
+
+  private AskKakoune<K extends keyof Splice>(
     embed: (snippet: string) => string,
     command: string,
     args: K[],
     on: (m: Pick<Splice, K>) => void
   ) {
     const lsp_json_kvs = args
-      .map(k => details[k].embed(`libkak-json-key-value ${k} ${details[k].expand(k)}`))
+      .map(k => this.details[k].embed(`libkak-json-key-value ${k} ${this.details[k].expand(k)}`))
       .join('\n    ')
-    snippet_cb(
+    this.msg(
       embed(`
       eval -draft -no-hooks %(
         edit -debug -scratch *libkak-expand*
@@ -115,141 +184,80 @@ const ask_kakoune = <Splice>(
         eval -buffer *libkak-expand* %(
           libkak-json-escape
           exec gea}<esc>
-          echo -debug fifo:${fifo}
-          exec \\% |tee <space> ${fifo} <ret>
-          # write ${fifo}
+          echo -debug fifo:${this.fifo}
+          exec \\% |cat>${this.fifo} <ret>
+          # write ${this.fifo}
         )
       )`)
     )
-    handler_map[command] = (parsed_json_line: Partial<Record<keyof Splice, string>>) => {
+    this.handlers[command] = (parsed_json_line: Partial<Record<keyof Splice, string>>) => {
       const parsed_rhss: Pick<Splice, K> = {} as any
       args.forEach((k: K) => {
         const rhs = parsed_json_line[k]
         if (rhs === undefined) {
           throw 'Missing ' + k
         }
-        parsed_rhss[k] = details[k].parse(rhs)
+        parsed_rhss[k] = this.details[k].parse(rhs)
       })
       on(parsed_rhss)
     }
   }
-  function AskKakouneWithReply<K extends keyof Splice>(
+
+  private AskKakouneWithReply<K extends keyof Splice>(
     embed: (snippet: string) => string,
     command: string,
     args: K[],
     on: (m: Pick<Splice, K>) => string
   ) {
-    return AskKakoune(s => embed(s + `; %sh{ cat ${reply_fifo} }`), command, args, m => {
+    this.AskKakoune(s => embed(s + `; %sh{ cat ${this.reply_fifo} }`), command, args, m => {
       let reply = `echo -debug "libkak.ts AskKakouneWithReply request ${command} failed"`
       try {
         reply = on(m)
       } finally {
-        fs.appendFileSync(reply_fifo, reply)
+        fs.appendFileSync(this.reply_fifo, reply)
       }
     })
   }
-  let ask_counter = 0
-  return {
-    ask<K extends keyof Splice>(args: K[], on: (m: Pick<Splice, K>) => void) {
-      const command_name = '__ask__' + ask_counter++
-      AskKakoune(id, command_name, args, m => (on(m), delete handler_map[command_name]))
-    },
-    ask_with_reply<K extends keyof Splice>(args: K[], on: (m: Pick<Splice, K>) => string) {
-      const command_name = '__ask__' + ask_counter++
-      AskKakouneWithReply(id, command_name, args, m => {
-        const s = on(m)
-        delete handler_map[command_name]
-        return s
-      })
-    },
-    def<K extends keyof Splice>(
-      command_name: string,
-      params: string,
-      args: K[],
-      on: (m: Pick<Splice, K>) => void
-    ) {
-      AskKakoune(
-        s => `def -allow-override ${command_name} ${params} %(` + s + `)`,
-        command_name,
-        args,
-        on
-      )
-    },
-    def_with_reply<K extends keyof Splice>(
-      command_name: string,
-      params: string,
-      args: K[],
-      on: (m: Pick<Splice, K>) => string
-    ) {
-      AskKakouneWithReply(
-        s => `def -allow-override ${command_name} ${params} %(` + s + `)`,
-        command_name,
-        args,
-        on
-      )
-    },
-    msg: snippet_cb,
+  private ask_counter = 0
+
+  ask<K extends keyof Splice>(args: K[], on: (m: Pick<Splice, K>) => void) {
+    const command_name = '__ask__' + this.ask_counter++
+    this.AskKakoune(id, command_name, args, m => (on(m), delete this.handlers[command_name]))
   }
-}
-
-//////////////////////////////////////////////////////////////////////////////
-// Handle incoming requsts and replies from kakoune
-
-function handle_incoming(options?: {debug?: boolean}) {
-  const tmpdir = child_process.execFileSync('mktemp', ['-d'], {encoding: 'utf8'}).trim()
-  const fifo = path.join(tmpdir, 'fifo')
-  const reply_fifo = path.join(tmpdir, 'replyfifo')
-  child_process.execFileSync('mkfifo', [fifo])
-  child_process.execFileSync('mkfifo', [reply_fifo])
-  const debug = (options && options.debug) || false
-  debug && console.error('created fifos:', {fifo, reply_fifo})
-  debug && console.error({readdir: fs.readdirSync(tmpdir)})
-
-  let torn_down = false
-  const handlers = {}
-  ;(function read_loop() {
-    fs.readFile(fifo, {encoding: 'utf8'}, (err, line: string) => {
-      if (err) {
-        if (torn_down && err.code == 'ENOENT') {
-          return
-        }
-        debug && console.error('read_loop error:', {err, torn_down})
-        throw err
-      } else {
-        const maxlen = 160
-        debug &&
-          console.log(
-            'From kakoune on fifo:',
-            line.slice(0, maxlen),
-            `(capped from ${line.length} to maxlen chars)`
-          )
-        const m = JSON.parse(line)
-        const h = (handlers as any)[m['command']]
-        h(m)
-      }
-      read_loop()
+  ask_with_reply<K extends keyof Splice>(args: K[], on: (m: Pick<Splice, K>) => string) {
+    const command_name = '__ask__' + this.ask_counter++
+    this.AskKakouneWithReply(id, command_name, args, m => {
+      const s = on(m)
+      delete this.handlers[command_name]
+      return s
     })
-  })()
-
-  function teardown() {
-    debug && console.error('teardown')
-    torn_down = true
-    fs.unlinkSync(fifo)
-    fs.unlinkSync(reply_fifo)
-    fs.rmdirSync(tmpdir)
   }
-
-  return {fifo, reply_fifo, handlers, teardown}
-}
-
-//////////////////////////////////////////////////////////////////////////////
-// Initiate the communication
-
-export function Init<Splice>(details: SpliceDetails<Splice>, options: CommunicationOptions) {
-  const h = handle_incoming(options)
-  const snippet_cb = (s: string) => MessageKakoune(options, s)
-  const kak = ask_kakoune(details, h.handlers, h.fifo, h.reply_fifo, snippet_cb)
-  return {...kak, teardown: h.teardown}
+  def<K extends keyof Splice>(
+    command_name: string,
+    params: string,
+    args: K[],
+    on: (m: Pick<Splice, K>) => void
+  ) {
+    this.AskKakoune(
+      s => `def -allow-override ${command_name} ${params} %(` + s + `)`,
+      command_name,
+      args,
+      on
+    )
+  }
+  def_with_reply<K extends keyof Splice>(
+    command_name: string,
+    params: string,
+    args: K[],
+    on: (m: Pick<Splice, K>) => string
+  ) {
+    this.AskKakouneWithReply(
+      s => `def -allow-override ${command_name} ${params} %(` + s + `)`,
+      command_name,
+      args,
+      on
+    )
+  }
 }
 
 //////////////////////////////////////////////////////////////////////////////

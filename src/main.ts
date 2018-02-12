@@ -9,7 +9,7 @@ import * as path from 'path'
 import * as cp from 'child_process'
 import * as process from 'process'
 import * as libkak from './libkak'
-import {Splice, Details, subkeys} from './libkak'
+import {Splice, Details, subkeys, Kak} from './libkak'
 import * as util from 'util'
 util.inspect.defaultOptions.depth = 5
 
@@ -21,7 +21,7 @@ if (!process.argv[2]) {
 let session = process.argv[2] || ''
 const debug = true
 
-const kak = libkak.Init(Details, {
+const kak = Kak.Init(Details, {
   session,
   client: 'unnamed0',
   debug: true,
