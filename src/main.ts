@@ -13,13 +13,32 @@ import {Splice, Details, subkeys, Kak} from './libkak'
 import * as util from 'util'
 util.inspect.defaultOptions.depth = 5
 
-if (!process.argv[2]) {
-  console.error('Need one argument: the kak session to connect to')
+const session = process.argv[2]
+const server = process.argv[3]
+const proto_args = process.argv.slice(4)
+const debug = proto_args.some(arg => arg == '-d')
+const args = proto_args.filter(arg => arg != '-d')
+
+if (!session || !server) {
+  console.error(`Need two arguments:
+
+    <kak session>
+    <server command>
+
+  Example:
+
+    yarn run 4782 javascript-typescript-stdio
+
+  (which can be installed with
+
+    yarn global add javascript-typescript-langserver
+
+  )
+
+  Add -d for debug output`)
   process.exit(1)
 }
 
-let session = process.argv[2] || ''
-const debug = true
 
 const kak = Kak.Init(Details, {
   session,
@@ -28,7 +47,7 @@ const kak = Kak.Init(Details, {
 })
 
 console.log('spawning')
-const child = cp.spawn('javascript-typescript-stdio', [], {
+const child = cp.spawn(server, args, {
   detached: true,
   stdio: 'pipe',
 })
@@ -86,7 +105,23 @@ SendRequest(lsp.InitializeRequest.type, {
   rootUri: 'file://' + process.cwd(),
   capabilities: {},
   trace: 'verbose',
-}).then((x: any) => console.log('initialized:', x))
+}).then((x: lsp.InitializeResult) => {
+  console.log('initialized:', x)
+  const comp = x.capabilities.completionProvider
+  if (comp) {
+    const chars = (comp.triggerCharacters || []).join('')
+    kak.msg(`
+      hook -group lsp global InsertChar [${chars}] %{exec '<a-;>: lsp-complete<ret>'}
+    `)
+  }
+  const sig = x.capabilities.signatureHelpProvider
+  if (sig) {
+    const chars = (sig.triggerCharacters || []).join('')
+    kak.msg(`
+      hook -group lsp global InsertChar [${chars}] %{exec '<a-;>: lsp-signature-help<ret>'}
+    `)
+  }
+})
 
 function Uri(d: Pick<Standard, 'buffile'>): lsp.TextDocumentIdentifier {
   return {
@@ -241,19 +276,16 @@ kak.def('lsp-signature-help', '-params 0..1', subkeys(Details, '1', ...StandardK
   const pos = Pos(m).position
   reply(m, libkak.info(msg, where, libkak.one_indexed(pos)))
 })
-;`enable with something like:
 
-  hook -group lsp buffer InsertChar [.] '<a-;>: lsp-complete<ret>'
-
-`
 kak.def('lsp-complete', '', subkeys(Details, 'completers', ...StandardKeys), async m => {
   Sync(m)
   const value = await SendRequest(lsp.CompletionRequest.type, Pos(m))
   console.dir({complete: value})
   const optname = 'lsp_completions'
   const opt = `option=${optname}`
+  const decl = `try %{ decl completions ${optname} }`
   const setup =
-    -1 == m.completers.indexOf(opt) ? `set -add buffer=${m.buffile} completers ${opt};` : ''
+    -1 == m.completers.indexOf(opt) ? `${decl}; set -add buffer=${m.buffile} completers ${opt};` : ''
   const rhs = `${m.cursor_line}.${m.cursor_column}@${m.timestamp}:${Complete(value)}`
   console.log({optname, opt, setup, rhs})
   reply(m, setup + `set buffer=${m.buffile} ${optname} ${libkak.quote(rhs)}`)
