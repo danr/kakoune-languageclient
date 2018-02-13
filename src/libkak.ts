@@ -388,6 +388,49 @@ export function info(msg: string, where: InfoPlacement = 'info', pos?: Pos): str
   }
 }
 
+export interface CompletionContext {
+  cursor_line: number
+  cursor_column: number
+  timestamp: number
+  completions: Completion[]
+}
+
+export interface Completion {
+  /** the inserted text */
+  insert: string
+  /** the help text */
+  help: string
+  /** what is written in the completions menu */
+  entry: string
+}
+
+export function Completion(insert: string, help: string, entry: string) {
+  return {insert, help, entry}
+}
+
+export function format_complete(cc: CompletionContext) {
+  const format_completion = (c: Completion) =>
+    [c.insert, c.help, c.entry].map(s => s.replace(/[|:\\]/g, x => '\\' + x)).join('|')
+  const rows = cc.completions.map(format_completion).join(':')
+  return `${cc.cursor_line}.${cc.cursor_column}@${cc.timestamp}:${rows}`
+}
+
+export function complete_reply(
+  optname: string,
+  cc: CompletionContext & {completers: string[]; buffile: string}
+) {
+  let setup = ''
+  const opt = `option=${optname}`
+  const buffer = quote('buffer=' + cc.buffile)
+  if (-1 == cc.completers.indexOf(opt)) {
+    setup += `try %{ decl completions ${optname} };`
+    setup += `set ${buffer} completers ${opt};`
+    // NB: no -add, we prevent all other completers for now
+  }
+  return setup + `set ${buffer} ${optname} ${quote(format_complete(cc))}`
+  // todo: lsp-complete fetch documentation when index in completion list changes
+}
+
 //////////////////////////////////////////////////////////////////////////////
 // File utils
 

@@ -39,7 +39,6 @@ if (!session || !server) {
   process.exit(1)
 }
 
-
 const kak = Kak.Init(Details, {
   session,
   client: 'unnamed0',
@@ -217,10 +216,10 @@ function Sig(value: lspt.SignatureHelp) {
     .join('\n')
 }
 
-function Complete(value: lspt.CompletionList | lspt.CompletionItem[]) {
+function Completions(value: lspt.CompletionList | lspt.CompletionItem[]): libkak.Completion[] {
   const items = Array.isArray(value) ? value : value.items
   const maxlen = Math.max(0, ...items.map(item => item.label.length))
-  return items.map(item => CompleteItem(item, maxlen).replace(/:/g, '\\:')).join(':')
+  return items.map(item => CompleteItem(item, maxlen))
 }
 
 const completion_kinds = {
@@ -244,13 +243,13 @@ const completion_kinds = {
   18: 'Reference',
 }
 
-function CompleteItem(item: lspt.CompletionItem, maxlen: number): string {
+function CompleteItem(item: lspt.CompletionItem, maxlen: number): libkak.Completion {
   const {label, kind, detail, documentation, insertText} = item
   const insert = insertText || label
-  const doc = [detail || '', documentation || ''].filter(x => x).join('\n\n')
+  const help = [detail || '', documentation || ''].filter(x => x).join('\n\n')
   const info = kind ? completion_kinds[kind] : ''
   const entry = label + ' '.repeat(maxlen - label.length) + ' {MenuInfo}' + info
-  return [insert, doc, entry].map(x => x.replace(/([|:])/g, s => '\\' + s)).join('|')
+  return {insert, help, entry}
 }
 
 const reply = ({client}: {client: string}, message: string) =>
@@ -281,13 +280,7 @@ kak.def('lsp-complete', '', subkeys(Details, 'completers', ...StandardKeys), asy
   Sync(m)
   const value = await SendRequest(lsp.CompletionRequest.type, Pos(m))
   console.dir({complete: value})
-  const optname = 'lsp_completions'
-  const opt = `option=${optname}`
-  const decl = `try %{ decl completions ${optname} }`
-  const setup =
-    -1 == m.completers.indexOf(opt) ? `${decl}; set -add buffer=${m.buffile} completers ${opt};` : ''
-  const rhs = `${m.cursor_line}.${m.cursor_column}@${m.timestamp}:${Complete(value)}`
-  console.log({optname, opt, setup, rhs})
-  reply(m, setup + `set buffer=${m.buffile} ${optname} ${libkak.quote(rhs)}`)
+  const cc = {...m, completions: Completions(value)}
+  return reply(m, libkak.complete_reply('lsp_completions', cc))
   // todo: lsp-complete fetch documentation when index in completion list changes
 })
