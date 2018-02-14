@@ -72,12 +72,21 @@ export const colons = (s: string) => s.split(':')
 export const subkeys = <S extends Record<string, any>, K extends keyof S>(m: S, ...ks: K[]) => ks
 
 //////////////////////////////////////////////////////////////////////////////
-// Messages to kakoune
+// Communicating with
 
+/** The Kak class
+
+When initializing a Kak object it sets up a way to communicate with a running kakoune session.
+
+It then provides an api to define commands, and message and query kakoune.
+
+Internally it runs an event loop which handles the replies from kakoune
+and runs the corresponding javascript callback on such a reply.
+
+*/
 export class Kak<Splice> {
+  /** Initialize a Kak object with a running kakoune session */
   static Init<Splice>(details: SpliceDetails<Splice>, options: MessageSettings): Kak<Splice> {
-    //////////////////////////////////////////////////////////////////////////////
-    // Handle incoming requests and replies from kakoune
     const tmpdir = child_process.execFileSync('mktemp', ['-d'], {encoding: 'utf8'}).trim()
     const fifo = path.join(tmpdir, 'fifo')
     const reply_fifo = path.join(tmpdir, 'replyfifo')
@@ -90,6 +99,8 @@ export class Kak<Splice> {
     let torn_down = false
     const handlers: Record<string, any> = {}
     ;(function read_loop() {
+      //////////////////////////////////////////////////////////////////////////////
+      // Handle incoming requests from kakoune
       fs.readFile(fifo, {encoding: 'utf8'}, (err, lines: string) => {
         if (err) {
           if (torn_down && err.code == 'ENOENT') {
