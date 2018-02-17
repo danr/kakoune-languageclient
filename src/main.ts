@@ -255,7 +255,7 @@ function CompleteItem(item: lspt.CompletionItem, maxlen: number): libkak.Complet
 const reply = ({client}: {client: string}, message: string) =>
   libkak.MessageKakoune({session, client, debug: true}, message)
 
-kak.def('lsp-hover', '-params 0..1', subkeys(Details, '1', ...StandardKeys), async m => {
+kak.def('lsp-hover -params 0..1', subkeys(Details, '1', ...StandardKeys), async m => {
   Sync(m)
   const value = await SendRequest(lsp.HoverRequest.type, Pos(m))
   console.dir({hover: value})
@@ -266,7 +266,7 @@ kak.def('lsp-hover', '-params 0..1', subkeys(Details, '1', ...StandardKeys), asy
   reply(m, libkak.info(msg, where, libkak.one_indexed(pos)))
 })
 
-kak.def('lsp-signature-help', '-params 0..1', subkeys(Details, '1', ...StandardKeys), async m => {
+kak.def('lsp-signature-help -params 0..1', subkeys(Details, '1', ...StandardKeys), async m => {
   Sync(m)
   const value = await SendRequest(lsp.SignatureHelpRequest.type, Pos(m))
   console.dir({sig: value})
@@ -276,7 +276,7 @@ kak.def('lsp-signature-help', '-params 0..1', subkeys(Details, '1', ...StandardK
   reply(m, libkak.info(msg, where, libkak.one_indexed(pos)))
 })
 
-kak.def('lsp-complete', '', subkeys(Details, 'completers', ...StandardKeys), async m => {
+kak.def('lsp-complete', subkeys(Details, 'completers', ...StandardKeys), async m => {
   Sync(m)
   const value = await SendRequest(lsp.CompletionRequest.type, Pos(m))
   console.dir({complete: value})

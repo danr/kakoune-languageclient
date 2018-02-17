@@ -74,6 +74,13 @@ export const subkeys = <S extends Record<string, any>, K extends keyof S>(m: S, 
 //////////////////////////////////////////////////////////////////////////////
 // Communicating with
 
+function compose<A,B,C>(f: (b: B) => C, g: (a: A) => B) {
+  return (a: A) => f(g(a))
+}
+function seq<A>(f: (a: A) => void, g: (a: A) => void) {
+  return (a: A) =>(f(a), g(a))
+}
+
 /** The Kak class
 
 When initializing a Kak object it sets up a way to communicate with a running kakoune session.
@@ -98,9 +105,9 @@ export class Kak<Splice> {
 
     let torn_down = false
     const handlers: Record<string, any> = {}
-    ;(function read_loop() {
-      //////////////////////////////////////////////////////////////////////////////
-      // Handle incoming requests from kakoune
+    //////////////////////////////////////////////////////////////////////////////
+    // Handle incoming requests from kakoune
+    function read_loop() {
       fs.readFile(fifo, {encoding: 'utf8'}, (err, lines: string) => {
         if (err) {
           if (torn_down && err.code == 'ENOENT') {
@@ -135,7 +142,9 @@ export class Kak<Splice> {
         }
         read_loop()
       })
-    })()
+    }
+
+    read_loop()
 
     function teardown() {
       debug && console.error('teardown')
@@ -143,6 +152,7 @@ export class Kak<Splice> {
       fs.unlinkSync(fifo)
       fs.unlinkSync(reply_fifo)
       fs.rmdirSync(tmpdir)
+      debug && console.error('teardown complete')
     }
 
     return new Kak(details, handlers, fifo, reply_fifo, teardown, (s: string) =>
@@ -174,12 +184,15 @@ export class Kak<Splice> {
       }`)
   }
 
-  private AskKakoune<K extends keyof Splice>(
+  private command_counter = 0
+
+  private run_query<K extends keyof Splice>(
     embed: (snippet: string) => string,
-    command: string,
+    one_shot: boolean,
     args: K[],
     on: (m: Pick<Splice, K>) => void
   ) {
+    const command = '' + this.command_counter++
     const lsp_json_kvs = args
       .map(k => this.details[k].embed(`libkak-json-key-value ${k} ${this.details[k].expand(k)}`))
       .join('\n    ')
@@ -197,6 +210,7 @@ export class Kak<Splice> {
           exec gea}<esc>
           echo -debug fifo:${this.fifo}
           exec \\% |cat>${this.fifo} <ret>
+          delete-buffer!
           # write ${this.fifo}
         )
       )`)
@@ -211,63 +225,86 @@ export class Kak<Splice> {
         parsed_rhss[k] = this.details[k].parse(rhs)
       })
       on(parsed_rhss)
+      if (one_shot) {
+        delete this.handlers[command]
+      }
     }
   }
 
-  private AskKakouneWithReply<K extends keyof Splice>(
-    embed: (snippet: string) => string,
-    command: string,
+  private query<K extends keyof Splice>(args: K[]) {
+    const parent = this
+    let _embed = (s: string) => s
+    let _on = (m: Pick<Splice, K>) => { return }
+    let _one_shot = true
+    return {
+      /** Precomposition */
+      embed(f: (s: string) => string)         { _embed = compose(f, _embed); return this },
+      on(f: (m: Pick<Splice, K>) => void) { _on = seq(_on, f); return this },
+      run() {
+        return parent.run_query(_embed, _one_shot, args, _on)
+      },
+      msg(msg: string) {
+        this.embed(s => msg + '\n' + s)
+        return this
+      },
+      def(command_name_and_params: string) {
+        this.embed(s => `def -allow-override ${command_name_and_params} %(` + s + `)`)
+        _one_shot = false
+        return this
+      },
+      with_reply(h: (m: Pick<Splice, K>) => string) {
+        this.embed(s => s + `; %sh{ cat ${parent.reply_fifo} }`)
+        this.on(m => {
+          let reply = `echo -debug "libkak.ts AskKakouneWithReply request failed"`
+          try {
+            reply = h(m)
+          } finally {
+            fs.appendFileSync(parent.reply_fifo, reply)
+          }
+        })
+        return this
+      }
+    }
+  }
+
+  /* // These don't work properly, the read_loop never terminates
+  Ask<K extends keyof Splice>(args: K[]): Promise<Pick<Splice, K>> {
+    return new Promise(k => this.query(args).on(m => k(m)).run())
+  }
+  MsgAndAsk<K extends keyof Splice>(msg: string, args: K[]): Promise<Pick<Splice, K>> {
+    return new Promise(k => this.query(args).msg(msg).on(m => k(m)).run())
+  }
+  */
+
+  ask<K extends keyof Splice>(args: K[], on: (m: Pick<Splice, K>) => void) {
+    this.query(args).on(on).run()
+  }
+  ask_with_reply<K extends keyof Splice>(args: K[], on: (m: Pick<Splice, K>) => string) {
+    this.query(args).with_reply(on).run()
+  }
+  msg_and_ask<K extends keyof Splice>(msg: string, args: K[], on: (m: Pick<Splice, K>) => void) {
+    this.query(args).msg(msg).on(on).run()
+  }
+  msg_and_ask_with_reply<K extends keyof Splice>(
+    msg: string,
     args: K[],
     on: (m: Pick<Splice, K>) => string
   ) {
-    this.AskKakoune(s => embed(s + `; %sh{ cat ${this.reply_fifo} }`), command, args, m => {
-      let reply = `echo -debug "libkak.ts AskKakouneWithReply request ${command} failed"`
-      try {
-        reply = on(m)
-      } finally {
-        fs.appendFileSync(this.reply_fifo, reply)
-      }
-    })
-  }
-  private ask_counter = 0
-
-  ask<K extends keyof Splice>(args: K[], on: (m: Pick<Splice, K>) => void) {
-    const command_name = '__ask__' + this.ask_counter++
-    this.AskKakoune(id, command_name, args, m => (on(m), delete this.handlers[command_name]))
-  }
-  ask_with_reply<K extends keyof Splice>(args: K[], on: (m: Pick<Splice, K>) => string) {
-    const command_name = '__ask__' + this.ask_counter++
-    this.AskKakouneWithReply(id, command_name, args, m => {
-      const s = on(m)
-      delete this.handlers[command_name]
-      return s
-    })
+    this.query(args).msg(msg).with_reply(on).run()
   }
   def<K extends keyof Splice>(
-    command_name: string,
-    params: string,
+    command_name_and_params: string,
     args: K[],
     on: (m: Pick<Splice, K>) => void
   ) {
-    this.AskKakoune(
-      s => `def -allow-override ${command_name} ${params} %(` + s + `)`,
-      command_name,
-      args,
-      on
-    )
+    this.query(args).on(on).def(command_name_and_params).run()
   }
   def_with_reply<K extends keyof Splice>(
-    command_name: string,
-    params: string,
+    command_name_and_params: string,
     args: K[],
     on: (m: Pick<Splice, K>) => string
   ) {
-    this.AskKakouneWithReply(
-      s => `def -allow-override ${command_name} ${params} %(` + s + `)`,
-      command_name,
-      args,
-      on
-    )
+    this.query(args).with_reply(on).def(command_name_and_params).run()
   }
 }
 
