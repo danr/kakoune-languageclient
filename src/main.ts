@@ -50,6 +50,8 @@ const kak = Kak.Init(Splice, {
   debug,
 })
 
+kak.msg(`rmhooks global lsp`)
+
 console.log('spawning')
 const child = cp.spawn(server, args, {
   detached: true,
@@ -228,8 +230,13 @@ function Sig(value: lspt.SignatureHelp) {
     .join('\n')
 }
 
-function Completions(value: lspt.CompletionList | lspt.CompletionItem[]): libkak.Completion[] {
-  const items = Array.isArray(value) ? value : value.items
+function CompletionItems(
+  value: lspt.CompletionList | lspt.CompletionItem[]
+): lspt.CompletionItem[] {
+  return Array.isArray(value) ? value : value.items
+}
+
+function Completions(items: lspt.CompletionItem[]): libkak.Completion[] {
   const maxlen = Math.max(0, ...items.map(item => item.label.length))
   return items.map(item => CompleteItem(item, maxlen))
 }
@@ -340,17 +347,74 @@ def(
   }
 )
 
-def(
-  'lsp-complete',
-  subkeys(Splice, 'completers', ...StandardKeys),
-  m => (Sync(m), SendRequest(lsp.CompletionRequest.type, Pos(m))),
-  (k, m, value) => {
-    debug_values && console.dir({complete: value})
-    const cc = {...m, completions: Completions(value)}
-    k.msg(libkak.complete_reply('lsp_completions', cc))
-    // todo: lsp-complete fetch documentation when index in completion list changes
-  }
-)
+{
+  let completions = 0
+  const label_to_item: Record<string, (label: string) => lspt.CompletionItem> = {}
+  const update_cbs: Record<
+    string,
+    (timestamp: number, prev: lspt.CompletionItem, updated: lspt.CompletionItem) => void
+  > = {}
+
+  def(
+    'lsp-completion-update -hidden -params 2',
+    ['1', '2', 'timestamp'],
+    async m => {
+      try {
+        console.log({m, label_to_item})
+        const item = label_to_item[m[1]](m[2])
+        console.log({m, item})
+        return {
+          ok: true as true,
+          value: await SendRequest(lsp.CompletionResolveRequest.type, item),
+        }
+      } catch (e) {
+        return {ok: false as false}
+      }
+    },
+    (_k, m, v) => v.ok && update_cbs[m[1]](m.timestamp, label_to_item[m[1]](m[2]), v.value)
+  )
+
+  kak.def('lsp-completion-forget -hidden -params 1', ['1'], m => {
+    console.log('forgetting', {m})
+    delete label_to_item[m[1]]
+    delete update_cbs[m[1]]
+  })
+
+  def(
+    'lsp-complete',
+    subkeys(Splice, 'completers', ...StandardKeys),
+    m => (Sync(m), SendRequest(lsp.CompletionRequest.type, Pos(m))),
+    (k, m, value) => {
+      debug_values && console.dir({complete: value})
+      let items = CompletionItems(value)
+      const cc = {...m, completions: Completions(items)}
+      const unique = '' + completions++
+      label_to_item[unique] = (label: string) => {
+        const filtered = items.filter(item => item.label == label)
+        console.log({label, filtered, items})
+        return filtered[0]
+      }
+      update_cbs[unique] = (timestamp, prev, updated) => {
+        console.dir({timestamp, m, updated}, {color: true})
+        items = items.map(item => (item == prev ? updated : item))
+        const cc = {...m, timestamp, completions: Completions(items)}
+        k.msg(libkak.complete_reply('lsp_completions', cc))
+      }
+      k.msg(`
+      rmhooks window lsp-complete
+      hook -group lsp-complete window InsertCompletionSelect .* %{
+        echo InsertCompletionSelect %val{hook_param}
+        lsp-completion-update ${unique} %val{hook_param}
+      }
+      hook -group lsp-complete window InsertCompletionHide .* %{
+        lsp-completion-forget ${unique}
+      }
+      ${libkak.complete_reply('lsp_completions', cc)}
+    `)
+      // todo: lsp-complete fetch documentation when index in completion list changes
+    }
+  )
+}
 
 def(
   'lsp-goto-definition',

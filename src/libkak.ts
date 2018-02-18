@@ -42,6 +42,7 @@ export interface Splice {
   cursor_column: number
   filetype: string
   1: string
+  2: string
   completers: string[]
   '"': string
 }
@@ -61,6 +62,7 @@ export const Splice: Spliceable<Splice> = {
   ...val('selections_desc', s => s.split(':').map(parse_cursor)),
   ...opt('filetype', id),
   ...arg('1', id),
+  ...arg('2', id),
   ...opt('completers', colons),
   ...reg('"', id),
 }
@@ -205,12 +207,11 @@ export function complete_reply(
 ) {
   let setup = ''
   const opt = `option=${optname}`
-  const buffer = quote('buffer=' + cc.buffile)
   if (-1 == cc.completers.indexOf(opt)) {
     setup += `try %{ decl completions ${optname} };`
-    setup += `set ${buffer} completers ${opt};`
     // NB: no -add, we prevent all other completers for now
   }
-  return setup + `set ${buffer} ${optname} ${quote(format_complete(cc))}`
-  // todo: lsp-complete fetch documentation when index in completion list changes
+  setup += `set window ${optname} ${quote(format_complete(cc))};`
+  setup += `set window completers ${opt};`
+  return setup
 }
