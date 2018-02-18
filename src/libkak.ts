@@ -194,7 +194,11 @@ export class Kak<Splice> {
   ) {
     const command = '' + this.command_counter++
     const lsp_json_kvs = args
-      .map(k => this.details[k].embed(`libkak-json-key-value ${k} ${this.details[k].expand(k)}`))
+      .map(k =>
+        this.details[k].embed(
+          `libkak-json-key-value ${k == '"' ? '\\"' : k} ${this.details[k].expand(k)}`
+        )
+      )
       .join('\n    ')
     this.msg(
       embed(`
@@ -328,6 +332,7 @@ export interface Splice {
   filetype: string
   1: string
   completers: string[]
+  '"': string
 }
 
 export const Details: SpliceDetails<Splice> = {
@@ -346,6 +351,7 @@ export const Details: SpliceDetails<Splice> = {
   ...opt('filetype', id),
   ...arg('1', id),
   ...opt('completers', colons),
+  ...reg('"', id),
 }
 
 //////////////////////////////////////////////////////////////////////////////

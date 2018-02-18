@@ -257,60 +257,108 @@ const reply = ({client}: {client: string}, message: string) =>
 
 function select(range: lspt.Range): string {
   const start = libkak.format_pos(libkak.one_indexed(range.start))
-  const end = libkak.format_pos(libkak.one_indexed({...range.end, character: range.end.character-1}))
+  const end = libkak.format_pos(
+    libkak.one_indexed({...range.end, character: range.end.character - 1})
+  )
   return `select ${start},${end}`
 }
 
 function edit_uri_select(uri_string: string, range: lspt.Range): string {
-    const uri = Uri.parse(uri_string)
-    if (uri.scheme === 'file') {
-        return `edit ${(uri_string.slice('file://'.length))}; ${select(range)}`
-    } else {
-        return `echo -markup {red}Cannot open ${(uri_string)}`
-    }
+  const uri = Uri.parse(uri_string)
+  if (uri.scheme === 'file') {
+    return `edit ${uri_string.slice('file://'.length)}; ${select(range)}`
+  } else {
+    return `echo -markup {red}Cannot open ${uri_string}`
+    return `echo debug Cannot open ${uri_string}`
+  }
 }
 
+function def<K extends keyof Splice, I>(
+  command_name_and_params: string,
+  args: K[],
+  on: (m: Pick<Splice, K>) => Thenable<I>,
+  cont: (m: Pick<Splice, K>, i: I) => void
+) {
+  kak.def(command_name_and_params, args, async m => {
+    const i = await on(m)
+    console.log(JSON.stringify(i))
+    cont(m, i)
+  })
+  kak.def(`debug-${command_name_and_params}`, args, m => {
+    kak.ask(['"', 'client'], dq => {
+      try {
+        const i: I = JSON.parse(dq['"']) as any
+        cont(m, i)
+      } catch (e) {
+        reply(dq, `echo ${libkak.quote(e.toString())}`)
+        reply(
+          dq,
+          `
+            echo -debug debugging failed, put an object in %reg{"}:
+            echo -debug ${libkak.quote(e.toString())}
+          `
+        )
+      }
+    })
+  })
+}
 
-
-kak.def('lsp-hover -params 0..1', subkeys(Details, '1', ...StandardKeys), async m => {
-  Sync(m)
-  const value = await SendRequest(lsp.HoverRequest.type, Pos(m))
-  console.dir({hover: value})
-  const msg = linelimit(25, Hover(value))
-  const where = (m[1] as libkak.InfoPlacement) || 'info'
-  const pos = value.range ? value.range.start : Pos(m).position
-  console.log({msg, where, pos})
-  reply(m, libkak.info(msg, where, libkak.one_indexed(pos)))
-})
-
-kak.def('lsp-signature-help -params 0..1', subkeys(Details, '1', ...StandardKeys), async m => {
-  Sync(m)
-  const value = await SendRequest(lsp.SignatureHelpRequest.type, Pos(m))
-  console.dir({sig: value})
-  const msg = linelimit(25, Sig(value))
-  const where = (m[1] as libkak.InfoPlacement) || 'info'
-  const pos = Pos(m).position
-  reply(m, libkak.info(msg, where, libkak.one_indexed(pos)))
-})
-
-kak.def('lsp-complete', subkeys(Details, 'completers', ...StandardKeys), async m => {
-  Sync(m)
-  const value = await SendRequest(lsp.CompletionRequest.type, Pos(m))
-  console.dir({complete: value})
-  const cc = {...m, completions: Completions(value)}
-  return reply(m, libkak.complete_reply('lsp_completions', cc))
-  // todo: lsp-complete fetch documentation when index in completion list changes
-})
-
-kak.def('lsp-goto-definition', StandardKeys, async m => {
-  Sync(m)
-  const value = await SendRequest(lsp.DefinitionRequest.type, Pos(m))
-  console.dir({definition: value})
-  if (value === null) {
-    return reply(m, `No definition site found!`)
+def(
+  'lsp-hover -params 0..1',
+  subkeys(Details, '1', ...StandardKeys),
+  m => (Sync(m), SendRequest(lsp.HoverRequest.type, Pos(m))),
+  (m, value) => {
+    debug_values && console.dir({hover: value})
+    const msg = linelimit(25, Hover(value))
+    const where = (m[1] as libkak.InfoPlacement) || 'info'
+    const pos = value.range ? value.range.start : Pos(m).position
+    debug_out && console.log({msg, where, pos})
+    reply(m, libkak.info(msg, where, libkak.one_indexed(pos)))
   }
-  const locs = Array.isArray(value) ? value : [value]
-  const menu = libkak.menu(locs.map(loc => ({title: loc.uri + ':' + (loc.range.start.line + 1), command: edit_uri_select(loc.uri, loc.range)})))
-  return reply(m, menu)
-})
+)
 
+def(
+  'lsp-signature-help -params 0..1',
+  subkeys(Details, '1', ...StandardKeys),
+  m => (Sync(m), SendRequest(lsp.SignatureHelpRequest.type, Pos(m))),
+  (m, value) => {
+    SendRequest(lsp.SignatureHelpRequest.type, Pos(m))
+    debug_values && console.dir({sig: value})
+    const msg = linelimit(25, Sig(value))
+    const where = (m[1] as libkak.InfoPlacement) || 'info'
+    const pos = Pos(m).position
+    reply(m, libkak.info(msg, where, libkak.one_indexed(pos)))
+  }
+)
+
+def(
+  'lsp-complete',
+  subkeys(Details, 'completers', ...StandardKeys),
+  m => (Sync(m), SendRequest(lsp.CompletionRequest.type, Pos(m))),
+  (m, value) => {
+    debug_values && console.dir({complete: value})
+    const cc = {...m, completions: Completions(value)}
+    reply(m, libkak.complete_reply('lsp_completions', cc))
+    // todo: lsp-complete fetch documentation when index in completion list changes
+  }
+)
+
+def(
+  'lsp-goto-definition',
+  StandardKeys,
+  m => (Sync(m), SendRequest(lsp.DefinitionRequest.type, Pos(m))),
+  (m, value) => {
+    debug_values && console.dir({definition: value})
+    if (value === null) {
+      return reply(m, `No definition site found!`)
+    }
+    const locs = Array.isArray(value) ? value : [value]
+    const menu = libkak.menu(
+      locs.map(loc => ({
+        title: loc.uri + ':' + (loc.range.start.line + 1),
+        command: edit_uri_select(loc.uri, loc.range),
+      }))
+    )
+    reply(m, menu)
+  }
+)
