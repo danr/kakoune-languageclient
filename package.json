@@ -23,7 +23,7 @@
     "test": "ts-node test/libkak.test.ts | faucet",
     "example": "ts-node src/libkak-example.ts",
     "main": "ts-node src/main.ts",
-    "prettier": "prettier --list-different --write \"{src,test}/*.ts\""
+    "prettier": "prettier --list-different --write \"{src,test}/**/*.ts\""
   },
   "prettier": {
     "printWidth": 100,

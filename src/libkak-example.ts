@@ -1,6 +1,6 @@
 import * as process from 'process'
 import * as libkak from './libkak'
-import {Splice, Details, Kak} from './libkak'
+import {Splice, Kak} from './libkak'
 
 if (!process.argv[2]) {
   console.error('Need one argument: the kak session to connect to')
@@ -9,7 +9,7 @@ if (!process.argv[2]) {
 
 const session = process.argv[2]
 
-const kak = Kak.Init(Details, {
+const kak = Kak.Init(Splice, {
   session,
   client: 'unnamed0',
   debug: true,
@@ -35,7 +35,7 @@ kak.def_with_reply('js-eval-sync -params 1', ['1', 'client'], m => {
   return res
 })
 
-const all = Object.keys(libkak.Details) as (keyof typeof libkak.Details)[]
+const all = Object.keys(Splice) as (keyof typeof Splice)[]
 
 kak.def_with_reply('complete', all, m => {
   console.error(m)

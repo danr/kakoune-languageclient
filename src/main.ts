@@ -10,7 +10,7 @@ import * as path from 'path'
 import * as cp from 'child_process'
 import * as process from 'process'
 import * as libkak from './libkak'
-import {Splice, Details, subkeys, Kak} from './libkak'
+import {Splice, subkeys, Kak} from './libkak'
 import * as util from 'util'
 util.inspect.defaultOptions.depth = 5
 
@@ -45,7 +45,7 @@ if (!session || !server) {
   process.exit(1)
 }
 
-const kak = Kak.Init(Details, {
+const kak = Kak.Init(Splice, {
   session,
   debug,
 })
@@ -160,7 +160,7 @@ function linelimit(limit: number, msg: string): string {
 }
 
 const StandardKeys = subkeys(
-  Details,
+  Splice,
   'buffile',
   'client',
   'timestamp',
@@ -314,7 +314,7 @@ function def<K extends keyof Splice, I>(
 
 def(
   'lsp-hover -params 0..1',
-  subkeys(Details, '1', ...StandardKeys),
+  subkeys(Splice, '1', ...StandardKeys),
   m => (Sync(m), SendRequest(lsp.HoverRequest.type, Pos(m))),
   (k, m, value) => {
     debug_values && console.dir({hover: value})
@@ -328,7 +328,7 @@ def(
 
 def(
   'lsp-signature-help -params 0..1',
-  subkeys(Details, '1', ...StandardKeys),
+  subkeys(Splice, '1', ...StandardKeys),
   m => (Sync(m), SendRequest(lsp.SignatureHelpRequest.type, Pos(m))),
   (k, m, value) => {
     SendRequest(lsp.SignatureHelpRequest.type, Pos(m))
@@ -342,7 +342,7 @@ def(
 
 def(
   'lsp-complete',
-  subkeys(Details, 'completers', ...StandardKeys),
+  subkeys(Splice, 'completers', ...StandardKeys),
   m => (Sync(m), SendRequest(lsp.CompletionRequest.type, Pos(m))),
   (k, m, value) => {
     debug_values && console.dir({complete: value})

@@ -1,10 +1,10 @@
 import * as test from 'tape'
 import * as libkak from '../src/libkak'
-import {Splice, Details, Kak} from '../src/libkak'
+import {Splice, Kak} from '../src/libkak'
 
 const debug = false
 
-function kaktest(
+export function kaktest(
   name: string,
   cb: (kak: Kak<Splice>, t: test.Test, end: () => void) => void | Promise<any>
 ): void {
@@ -13,13 +13,13 @@ function kaktest(
     t.plan(1)
     const proc = libkak.Headless()
     const session = proc.pid
-    const kak = Kak.Init(Details, {session, client: 'unnamed0', debug})
+    const kak = Kak.Init(Splice, {session, client: 'unnamed0', debug})
     const end = () => (proc.kill(), kak.teardown(), t.end())
     cb(kak, t, end)
   })
 }
 
-const completion_tests = `
+export const example_strings = `
   simple
   c:d
   c|d
@@ -27,12 +27,12 @@ const completion_tests = `
   c"d
   c\\d
   '"\\:|
-  c{}d
+  c}d
 `
   .split(/\s/gm)
   .filter(x => x.trim().length > 0)
 
-completion_tests.forEach(s => {
+example_strings.forEach(s => {
   kaktest(`content ${s}`, (kak, t, end) => {
     kak.msg(`exec i${s}<esc>`)
     kak.ask(['content'], m => {
@@ -42,9 +42,9 @@ completion_tests.forEach(s => {
   })
 })
 
-const all = Object.keys(libkak.Details) as (keyof typeof libkak.Details)[]
+const all = Object.keys(libkak.Splice) as (keyof typeof libkak.Splice)[]
 
-completion_tests.forEach(entry => {
+example_strings.forEach(entry => {
   const target = `a${entry}`
   const completions: libkak.Completion[] = [
     libkak.Completion(target, '_1', 'a1'),
@@ -69,9 +69,9 @@ completion_tests.forEach(entry => {
       })
       kak.msg(`
         set global completers ''
-        try %{
+        try %(
           ${set}
-        } catch %{
+        ) catch %{
           failure
         }
         hook global InsertCompletionShow .* %{
@@ -152,21 +152,21 @@ for (let N = 2; N <= 8; N += 2) {
 
     let windows = 0
     kak.def('win-create', ['client'], m => {
-        windows++
-        if (windows == N) {
-            cbs.forEach(cb => cb())
-        }
+      windows++
+      if (windows == N) {
+        cbs.forEach(cb => cb())
+      }
     })
 
     kak.msg_and_ask(`hook global WinCreate .* win-create`, [], m => {
-        for (let i = 1; i <= N; i++) {
-          const name = `client${i}`
-          libkak.Headless('json', '-c', kak.session, '-e', `rename-client ${name}`)
-          cbs.push(() => {
-              expected_content += `${name}\n`
-              kak.focus(name).msg(`write-msg ${i}`)
-          })
-        }
+      for (let i = 1; i <= N; i++) {
+        const name = `client${i}`
+        libkak.Headless('json', '-c', kak.session, '-e', `rename-client ${name}`)
+        cbs.push(() => {
+          expected_content += `${name}\n`
+          kak.focus(name).msg(`write-msg ${i}`)
+        })
+      }
     })
   })
 }
