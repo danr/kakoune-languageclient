@@ -1,4 +1,5 @@
 import * as jsonrpc from 'vscode-jsonrpc'
+import Uri from 'vscode-uri'
 import * as ls from 'vscode-languageserver'
 import * as lsp from 'vscode-languageserver-protocol'
 import * as lspt from 'vscode-languageserver-types'
@@ -122,9 +123,9 @@ SendRequest(lsp.InitializeRequest.type, {
   }
 })
 
-function Uri(d: Pick<Standard, 'buffile'>): lsp.TextDocumentIdentifier {
+function Id(d: Pick<Standard, 'buffile'>): lsp.TextDocumentIdentifier {
   return {
-    uri: 'file://' + d.buffile,
+    uri: Uri.file(d.buffile).toString(),
   }
 }
 
@@ -132,7 +133,7 @@ function Pos(
   d: Pick<Standard, 'cursor_line' | 'cursor_column' | 'buffile'>
 ): lsp.TextDocumentPositionParams {
   return {
-    textDocument: Uri(d),
+    textDocument: Id(d),
     position: {
       line: d.cursor_line - 1,
       character: d.cursor_column - 1,
@@ -173,14 +174,14 @@ function Sync(m: Standard) {
       textDocument: {
         version,
         languageId: m.filetype,
-        ...Uri(m),
+        ...Id(m),
         text: m.content,
       },
     })
   } else {
     const version = file_version[m.buffile]++
     SendNotification(lsp.DidChangeTextDocumentNotification.type)({
-      textDocument: {version, ...Uri(m)},
+      textDocument: {version, ...Id(m)},
       contentChanges: [{text: m.content}],
     })
   }
@@ -255,6 +256,23 @@ function CompleteItem(item: lspt.CompletionItem, maxlen: number): libkak.Complet
 const reply = ({client}: {client: string}, message: string) =>
   libkak.MessageKakoune({session, client, debug: true}, message)
 
+function select(range: lspt.Range): string {
+  const start = libkak.format_pos(libkak.one_indexed(range.start))
+  const end = libkak.format_pos(libkak.one_indexed({...range.end, character: range.end.character-1}))
+  return `select ${start},${end}`
+}
+
+function edit_uri_select(uri_string: string, range: lspt.Range): string {
+    const uri = Uri.parse(uri_string)
+    if (uri.scheme === 'file') {
+        return `edit ${(uri_string.slice('file://'.length))}; ${select(range)}`
+    } else {
+        return `echo -markup {red}Cannot open ${(uri_string)}`
+    }
+}
+
+
+
 kak.def('lsp-hover -params 0..1', subkeys(Details, '1', ...StandardKeys), async m => {
   Sync(m)
   const value = await SendRequest(lsp.HoverRequest.type, Pos(m))
@@ -284,3 +302,16 @@ kak.def('lsp-complete', subkeys(Details, 'completers', ...StandardKeys), async m
   return reply(m, libkak.complete_reply('lsp_completions', cc))
   // todo: lsp-complete fetch documentation when index in completion list changes
 })
+
+kak.def('lsp-goto-definition', StandardKeys, async m => {
+  Sync(m)
+  const value = await SendRequest(lsp.DefinitionRequest.type, Pos(m))
+  console.dir({definition: value})
+  if (value === null) {
+    return reply(m, `No definition site found!`)
+  }
+  const locs = Array.isArray(value) ? value : [value]
+  const menu = libkak.menu(locs.map(loc => ({title: loc.uri + ':' + (loc.range.start.line + 1), command: edit_uri_select(loc.uri, loc.range)})))
+  return reply(m, menu)
+})
+

@@ -406,11 +406,13 @@ export function menu(options: {title: string; command: string}[]) {
   if (options.length == 1) {
     return options[0].command
   } else {
-    return 'menu ' + options.map(opt => quote(opt.title) + ' ' + quote(opt.command)).join(' ')
+    const m =  'menu ' + options.map(opt => quote(opt.title) + ' ' + quote(opt.command)).join(' ')
+    console.error({menu: m})
+    return m
   }
 }
 
-export type InfoPlacement = 'above' | 'below' | 'info' | 'docsclient'
+export type InfoPlacement = 'above' | 'below' | 'info' | 'docsclient' | 'statusline'
 
 export function info(msg: string, where: InfoPlacement = 'info', pos?: Pos): string {
   if (msg.trim() == '') {
@@ -428,6 +430,8 @@ export function info(msg: string, where: InfoPlacement = 'info', pos?: Pos): str
         try %{rmhl window/number_lines}
         %sh{rm ${tmp}}
       }`
+    case 'statusline':
+      return `echo ${quote(msg.replace(/\s+/gm, ' '))}`
     case 'info':
       return `info ${quote(msg)}`
     case 'above':
