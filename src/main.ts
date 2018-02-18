@@ -42,8 +42,7 @@ if (!session || !server) {
 
 const kak = Kak.Init(Details, {
   session,
-  client: 'unnamed0',
-  debug: true,
+  debug,
 })
 
 console.log('spawning')
