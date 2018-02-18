@@ -103,7 +103,7 @@ kaktest('def_with_reply', (kak, t, end) => {
 })
 
 for (let N = 4; N <= 16; N += 4) {
-  kaktest(`def ${N} writes (asynchronous)`, (kak, t, end) => {
+  kaktest(`${N} asynchronous writes`, (kak, t, end) => {
     let seen = 0
     let expected_content = ''
     kak.def('write-msg -params 1', ['1'], m => {
@@ -125,5 +125,48 @@ for (let N = 4; N <= 16; N += 4) {
       expected_content += `${i}\n`
       kak.msg(`write-msg ${i}`)
     }
+  })
+}
+
+for (let N = 2; N <= 8; N += 2) {
+  kaktest(`${N} simultaneous clients`, (kak, t, end) => {
+    let seen = 0
+    let expected_content = ''
+    kak.def('write-msg -params 1', ['1', 'client'], m => {
+      const w = m[1]
+      const k = kak.focus(m.client)
+      k.msg_and_ask(`exec ${w}g i %val{client} <esc>; quit`, [], () => {
+        seen++
+        if (seen == N) {
+          kak.ask(['content'], m => {
+            t.equal(m.content, expected_content)
+            end()
+          })
+        }
+      })
+    })
+
+    kak.msg(`exec ${N - 1}o<esc>`)
+
+    const cbs: (() => void)[] = []
+
+    let windows = 0
+    kak.def('win-create', ['client'], m => {
+        windows++
+        if (windows == N) {
+            cbs.forEach(cb => cb())
+        }
+    })
+
+    kak.msg_and_ask(`hook global WinCreate .* win-create`, [], m => {
+        for (let i = 1; i <= N; i++) {
+          const name = `client${i}`
+          libkak.Headless('json', '-c', kak.session, '-e', `rename-client ${name}`)
+          cbs.push(() => {
+              expected_content += `${name}\n`
+              kak.focus(name).msg(`write-msg ${i}`)
+          })
+        }
+    })
   })
 }

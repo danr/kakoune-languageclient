@@ -163,6 +163,10 @@ export class Kak<Splice> {
     MessageKakoune(this.options, s)
   }
 
+  get session(): string {
+    return this.options.session + ''
+  }
+
   focus(client: string | undefined) {
     return new Kak(
       this.details,
@@ -198,7 +202,7 @@ export class Kak<Splice> {
       }`)
   }
 
-  private command_counter = 0
+  private static command_counter = 0
 
   private run_query<K extends keyof Splice>(
     embed: (snippet: string) => string,
@@ -206,7 +210,7 @@ export class Kak<Splice> {
     args: K[],
     on: (m: Pick<Splice, K>) => void
   ) {
-    const command = '' + this.command_counter++
+    const command = '' + Kak.command_counter++
     const lsp_json_kvs = args
       .map(k =>
         this.details[k].embed(
@@ -536,8 +540,10 @@ export function TempFile(contents: string): string {
   return filename
 }
 
-export const Headless = (ui: string = 'dummy') => {
-  const kak = child_process.execFile('kak', ['-n', '-ui', ui])
+export function Headless(ui: string = 'dummy', ...args: string[]) {
+  const n = args.indexOf('-c') == -1 ? ['-n'] : []
+  const spawn_args = [...n, '-ui', ui, ...args]
+  const kak = child_process.execFile('kak', spawn_args)
   return {
     pid: kak.pid,
     kill() {
