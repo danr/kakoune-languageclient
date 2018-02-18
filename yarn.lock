@@ -446,7 +446,7 @@ vscode-languageserver@^3.5.0:
 
 vscode-uri@^1.0.1:
   version "1.0.1"
-  resolved "https://registry.npmjs.org/vscode-uri/-/vscode-uri-1.0.1.tgz#11a86befeac3c4aa3ec08623651a3c81a6d0bbc8"
+  resolved "https://registry.yarnpkg.com/vscode-uri/-/vscode-uri-1.0.1.tgz#11a86befeac3c4aa3ec08623651a3c81a6d0bbc8"
 
 wrappy@1:
   version "1.0.2"
