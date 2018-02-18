@@ -5,7 +5,7 @@ import * as path from 'path'
 //////////////////////////////////////////////////////////////////////////////
 // Simple communication
 
-export interface MessageSettings {
+export interface MessageOptions {
   session: string | number
   client?: string
   try_client?: boolean
@@ -14,10 +14,11 @@ export interface MessageSettings {
 
 /** Note: this is available as the `msg` property on Kak objects */
 export function MessageKakoune(
-  {session, client, try_client, debug}: MessageSettings,
+  {session, client, try_client, debug}: MessageOptions,
   message: string
 ) {
-  debug && console.error({session, client, message})
+  debug && console.error({session, client})
+  debug && console.error(message)
   if (message.trim() == '') {
     return
   }
@@ -74,11 +75,11 @@ export const subkeys = <S extends Record<string, any>, K extends keyof S>(m: S, 
 //////////////////////////////////////////////////////////////////////////////
 // Communicating with
 
-function compose<A,B,C>(f: (b: B) => C, g: (a: A) => B) {
+function compose<A, B, C>(f: (b: B) => C, g: (a: A) => B) {
   return (a: A) => f(g(a))
 }
 function seq<A>(f: (a: A) => void, g: (a: A) => void) {
-  return (a: A) =>(f(a), g(a))
+  return (a: A) => (f(a), g(a))
 }
 
 /** The Kak class
@@ -93,7 +94,7 @@ and runs the corresponding javascript callback on such a reply.
 */
 export class Kak<Splice> {
   /** Initialize a Kak object with a running kakoune session */
-  static Init<Splice>(details: SpliceDetails<Splice>, options: MessageSettings): Kak<Splice> {
+  static Init<Splice>(details: SpliceDetails<Splice>, options: MessageOptions): Kak<Splice> {
     const tmpdir = child_process.execFileSync('mktemp', ['-d'], {encoding: 'utf8'}).trim()
     const fifo = path.join(tmpdir, 'fifo')
     const reply_fifo = path.join(tmpdir, 'replyfifo')
@@ -155,8 +156,21 @@ export class Kak<Splice> {
       debug && console.error('teardown complete')
     }
 
-    return new Kak(details, handlers, fifo, reply_fifo, teardown, (s: string) =>
-      MessageKakoune(options, s)
+    return new Kak(details, handlers, fifo, reply_fifo, options, teardown)
+  }
+
+  msg(s: string): void {
+    MessageKakoune(this.options, s)
+  }
+
+  focus(client: string | undefined) {
+    return new Kak(
+      this.details,
+      this.handlers,
+      this.fifo,
+      this.reply_fifo,
+      {...this.options, client},
+      this.teardown
     )
   }
 
@@ -165,11 +179,11 @@ export class Kak<Splice> {
     private readonly handlers: Record<string, any>,
     private readonly fifo: string,
     private readonly reply_fifo: string,
-    public readonly teardown: () => void,
-    public readonly msg: (s: string) => void
+    private readonly options: MessageOptions,
+    public readonly teardown: () => void
   ) {
     const bs = '\\'
-    msg(`
+    this.msg(`
       # mutates q register
       def -hidden -allow-override libkak-json-key-value -params 2 %{
         reg q %arg{2}
@@ -238,12 +252,20 @@ export class Kak<Splice> {
   private query<K extends keyof Splice>(args: K[]) {
     const parent = this
     let _embed = (s: string) => s
-    let _on = (m: Pick<Splice, K>) => { return }
+    let _on = (m: Pick<Splice, K>) => {
+      return
+    }
     let _one_shot = true
     return {
       /** Precomposition */
-      embed(f: (s: string) => string)         { _embed = compose(f, _embed); return this },
-      on(f: (m: Pick<Splice, K>) => void) { _on = seq(_on, f); return this },
+      embed(f: (s: string) => string) {
+        _embed = compose(f, _embed)
+        return this
+      },
+      on(f: (m: Pick<Splice, K>) => void) {
+        _on = seq(_on, f)
+        return this
+      },
       run() {
         return parent.run_query(_embed, _one_shot, args, _on)
       },
@@ -267,7 +289,7 @@ export class Kak<Splice> {
           }
         })
         return this
-      }
+      },
     }
   }
 
@@ -281,34 +303,50 @@ export class Kak<Splice> {
   */
 
   ask<K extends keyof Splice>(args: K[], on: (m: Pick<Splice, K>) => void) {
-    this.query(args).on(on).run()
+    this.query(args)
+      .on(on)
+      .run()
   }
   ask_with_reply<K extends keyof Splice>(args: K[], on: (m: Pick<Splice, K>) => string) {
-    this.query(args).with_reply(on).run()
+    this.query(args)
+      .with_reply(on)
+      .run()
   }
   msg_and_ask<K extends keyof Splice>(msg: string, args: K[], on: (m: Pick<Splice, K>) => void) {
-    this.query(args).msg(msg).on(on).run()
+    this.query(args)
+      .msg(msg)
+      .on(on)
+      .run()
   }
   msg_and_ask_with_reply<K extends keyof Splice>(
     msg: string,
     args: K[],
     on: (m: Pick<Splice, K>) => string
   ) {
-    this.query(args).msg(msg).with_reply(on).run()
+    this.query(args)
+      .msg(msg)
+      .with_reply(on)
+      .run()
   }
   def<K extends keyof Splice>(
     command_name_and_params: string,
     args: K[],
     on: (m: Pick<Splice, K>) => void
   ) {
-    this.query(args).on(on).def(command_name_and_params).run()
+    this.query(args)
+      .on(on)
+      .def(command_name_and_params)
+      .run()
   }
   def_with_reply<K extends keyof Splice>(
     command_name_and_params: string,
     args: K[],
     on: (m: Pick<Splice, K>) => string
   ) {
-    this.query(args).with_reply(on).def(command_name_and_params).run()
+    this.query(args)
+      .with_reply(on)
+      .def(command_name_and_params)
+      .run()
   }
 }
 
@@ -412,7 +450,7 @@ export function menu(options: {title: string; command: string}[]) {
   if (options.length == 1) {
     return options[0].command
   } else {
-    const m =  'menu ' + options.map(opt => quote(opt.title) + ' ' + quote(opt.command)).join(' ')
+    const m = 'menu ' + options.map(opt => quote(opt.title) + ' ' + quote(opt.command)).join(' ')
     console.error({menu: m})
     return m
   }

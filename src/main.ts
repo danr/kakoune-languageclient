@@ -17,8 +17,13 @@ util.inspect.defaultOptions.depth = 5
 const session = process.argv[2]
 const server = process.argv[3]
 const proto_args = process.argv.slice(4)
-const debug = proto_args.some(arg => arg == '-d')
 const args = proto_args.filter(arg => arg != '-d')
+
+const debug = proto_args.some(arg => arg == '-d')
+const debug_values = debug
+const debug_out = debug
+const debug_to_kakoune = debug
+const debug_connection = debug
 
 if (!session || !server) {
   console.error(`Need two arguments:
@@ -66,24 +71,31 @@ function OnNotification<P, RO>(
 }
 
 OnNotification(lsp.ShowMessageNotification.type, params => {
-  console.group('notification', params.type)
-  console.log(params.message)
-  console.groupEnd()
+  if (debug_connection) {
+    console.group('notification', params.type)
+    console.log(params.message)
+    console.groupEnd()
+  }
 })
 
 OnNotification(lsp.PublishDiagnosticsNotification.type, params => {
-  console.group('diagnostics', params.uri)
-  params.diagnostics.forEach(d => {
-    console.log(d.range)
-    console.log(d.message)
-  })
-  console.groupEnd()
+  if (debug_connection) {
+    console.group('diagnostics', params.uri)
+    params.diagnostics.forEach(d => {
+      console.log(d.range)
+      console.log(d.message)
+    })
+    console.groupEnd()
+  }
 })
 
-connection.onNotification((method: string, ...params: any[]) =>
-  console.log('notification', method, JSON.stringify(params))
+connection.onNotification(
+  (method: string, ...params: any[]) =>
+    debug_connection && console.log('notification', method, JSON.stringify(params))
 )
-connection.onRequest((method: string, ...params: any[]) => console.log('request', method))
+connection.onRequest(
+  (method: string, ...params: any[]) => debug_connection && console.log('request', method)
+)
 
 connection.listen()
 
@@ -117,7 +129,7 @@ SendRequest(lsp.InitializeRequest.type, {
   if (sig) {
     const chars = (sig.triggerCharacters || []).join('')
     kak.msg(`
-      hook -group lsp global InsertChar [${chars}] %{exec '<a-;>: lsp-signature-help<ret>'}
+      hook -group lsp global InsertChar [${chars}] %{exec ': lsp-signature-help<ret>'}
     `)
   }
 })
@@ -252,9 +264,6 @@ function CompleteItem(item: lspt.CompletionItem, maxlen: number): libkak.Complet
   return {insert, help, entry}
 }
 
-const reply = ({client}: {client: string}, message: string) =>
-  libkak.MessageKakoune({session, client, debug: true}, message)
-
 function select(range: lspt.Range): string {
   const start = libkak.format_pos(libkak.one_indexed(range.start))
   const end = libkak.format_pos(
@@ -277,22 +286,22 @@ function def<K extends keyof Splice, I>(
   command_name_and_params: string,
   args: K[],
   on: (m: Pick<Splice, K>) => Thenable<I>,
-  cont: (m: Pick<Splice, K>, i: I) => void
+  cont: (k: Kak<Splice>, m: Pick<Splice, K>, i: I) => void
 ) {
   kak.def(command_name_and_params, args, async m => {
     const i = await on(m)
     console.log(JSON.stringify(i))
-    cont(m, i)
+    cont(kak.focus(m.client), m, i)
   })
   kak.def(`debug-${command_name_and_params}`, args, m => {
-    kak.ask(['"', 'client'], dq => {
+    const k = kak.focus(m.client)
+    k.ask(['"', 'client'], dq => {
       try {
         const i: I = JSON.parse(dq['"']) as any
-        cont(m, i)
+        cont(k, m, i)
       } catch (e) {
-        reply(dq, `echo ${libkak.quote(e.toString())}`)
-        reply(
-          dq,
+        k.msg(`echo ${libkak.quote(e.toString())}`)
+        k.msg(
           `
             echo -debug debugging failed, put an object in %reg{"}:
             echo -debug ${libkak.quote(e.toString())}
@@ -307,13 +316,13 @@ def(
   'lsp-hover -params 0..1',
   subkeys(Details, '1', ...StandardKeys),
   m => (Sync(m), SendRequest(lsp.HoverRequest.type, Pos(m))),
-  (m, value) => {
+  (k, m, value) => {
     debug_values && console.dir({hover: value})
     const msg = linelimit(25, Hover(value))
     const where = (m[1] as libkak.InfoPlacement) || 'info'
     const pos = value.range ? value.range.start : Pos(m).position
     debug_out && console.log({msg, where, pos})
-    reply(m, libkak.info(msg, where, libkak.one_indexed(pos)))
+    k.msg(libkak.info(msg, where, libkak.one_indexed(pos)))
   }
 )
 
@@ -321,13 +330,13 @@ def(
   'lsp-signature-help -params 0..1',
   subkeys(Details, '1', ...StandardKeys),
   m => (Sync(m), SendRequest(lsp.SignatureHelpRequest.type, Pos(m))),
-  (m, value) => {
+  (k, m, value) => {
     SendRequest(lsp.SignatureHelpRequest.type, Pos(m))
     debug_values && console.dir({sig: value})
     const msg = linelimit(25, Sig(value))
     const where = (m[1] as libkak.InfoPlacement) || 'info'
     const pos = Pos(m).position
-    reply(m, libkak.info(msg, where, libkak.one_indexed(pos)))
+    k.msg(libkak.info(msg, where, libkak.one_indexed(pos)))
   }
 )
 
@@ -335,10 +344,10 @@ def(
   'lsp-complete',
   subkeys(Details, 'completers', ...StandardKeys),
   m => (Sync(m), SendRequest(lsp.CompletionRequest.type, Pos(m))),
-  (m, value) => {
+  (k, m, value) => {
     debug_values && console.dir({complete: value})
     const cc = {...m, completions: Completions(value)}
-    reply(m, libkak.complete_reply('lsp_completions', cc))
+    k.msg(libkak.complete_reply('lsp_completions', cc))
     // todo: lsp-complete fetch documentation when index in completion list changes
   }
 )
@@ -347,10 +356,11 @@ def(
   'lsp-goto-definition',
   StandardKeys,
   m => (Sync(m), SendRequest(lsp.DefinitionRequest.type, Pos(m))),
-  (m, value) => {
+  (k, m, value) => {
     debug_values && console.dir({definition: value})
     if (value === null) {
-      return reply(m, `No definition site found!`)
+      k.msg(`No definition site found!`)
+      return
     }
     const locs = Array.isArray(value) ? value : [value]
     const menu = libkak.menu(
@@ -359,6 +369,6 @@ def(
         command: edit_uri_select(loc.uri, loc.range),
       }))
     )
-    reply(m, menu)
+    k.msg(menu)
   }
 )
