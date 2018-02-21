@@ -88,9 +88,9 @@ export function quote(msg: string) {
   return (
     "'" +
     msg
-      .replace("\\'", "\\\\'")
-      .replace("'", "\\'")
-      .replace(/\\*$/, '') +
+      .replace(/\\'/g, "\\\\'")
+      .replace(/\'/g, "\\'")
+      .replace(/\\*$/g, '') +
     "'"
   )
 }
