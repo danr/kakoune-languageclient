@@ -129,7 +129,7 @@ SendRequest(lsp.InitializeRequest.type, {
   if (sig) {
     const chars = (sig.triggerCharacters || []).join('')
     kak.msg(`
-      hook -group lsp global InsertChar [${chars}] %{exec ': lsp-signature-help<ret>'}
+      hook -group lsp global InsertChar [${chars}] %{exec '<a-;>: lsp-signature-help<ret>'}
     `)
   }
 })
